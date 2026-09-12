@@ -119,14 +119,15 @@ SECTION_NAME = 'preprocessing_bywell'
 # would bury the warnings that matter under a dozen false alarms, since the
 # configuration file is shared across stages.
 _OTHER_STAGE_TOP_LEVEL = frozenset({'preprocessing_allwells', 'guide_filtering'})
-_OTHER_STAGE_SECTION = frozenset({'barcode_file', 'labels', 'feature_types',
-                                  'filtered_output_dir'})
+_OTHER_STAGE_SECTION = frozenset({'barcode_file', 'labels', 'feature_types'})
 _OTHER_STAGE_WELL = frozenset({'feature_dir', 'reads_file_pattern', 'reads_file',
                                'filter_duplicates', 'barcode_colname'})
 
 _TOP_LEVEL_KEYS = frozenset({'data_output_dir', 'local_output_dir', SECTION_NAME})
 _SECTION_KEYS = frozenset({'scallops_dir', 'merged_dir', 'filter_dir', 'qc_dir',
-                           'premerged', 'column_mapping', 'precomputed_filters',
+                           'filtered_output_dir', 'premerged', 'column_mapping',
+                           'column_prefix_mapping', 'exclude_patterns',
+                           'drop_unassigned', 'precomputed_filters',
                            'thresholds', 'global', 'wells'})
 
 
@@ -164,19 +165,41 @@ class WellConfig:
 
 @dataclass
 class BywellConfig:
-    """The settings CHART's QC reads, with their defaults in one place."""
+    """The by-well preprocessing settings, with their defaults in one place."""
     data_output_dir: str
     local_output_dir: str
     scallops_dir: str = ''
     merged_dir: str = 'preprocessing/bywell/'
     filter_dir: str = 'preprocessing/bywell/filters/'
     qc_dir: str = 'preprocessing/bywell/qc_reports/'
+    filtered_output_dir: str = 'preprocessing/bywell/filtered/'
     premerged: bool = False
     column_mapping: Optional[Dict[str, str]] = None
+    column_prefix_mapping: Optional[Dict[str, str]] = None
+    exclude_patterns: Optional[List[str]] = None
+    drop_unassigned: bool = False
     precomputed_filters: Optional[Dict[str, Any]] = None
     thresholds: Thresholds = field(default_factory=Thresholds)
     wells: Dict[str, WellConfig] = field(default_factory=dict)
     defaults: WellConfig = field(default_factory=WellConfig)
+
+    # Directories, resolved against the relevant output root.  Bulk data goes
+    # to data_output_dir; reports and filter lists stay local.
+    @property
+    def merged_path(self) -> str:
+        return join_path(self.data_output_dir, self.merged_dir)
+
+    @property
+    def filtered_path(self) -> str:
+        return join_path(self.data_output_dir, self.filtered_output_dir)
+
+    @property
+    def filters_path(self) -> str:
+        return join_path(self.local_output_dir, self.filter_dir)
+
+    @property
+    def reports_path(self) -> str:
+        return join_path(self.local_output_dir, self.qc_dir)
 
     def well(self, name: str) -> WellConfig:
         """Settings for *name*, falling back to the global block when the

@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import List, Optional, Sequence
 
 from .io.config import join_path, load_bywell_config
+from .filtering import TARGETS
 from .preprocessing import STEPS, run_preprocessing
 from .qc import COMPONENTS
 
@@ -89,6 +90,11 @@ def _add_preprocessing_parser(subcommands) -> None:
                              'makes its prerequisites mandatory, so the run '
                              'fails rather than skipping it when they are '
                              'missing.')
+    parser.add_argument('--targets', nargs='+',
+                        choices=('all',) + TARGETS,
+                        default=['all'],
+                        help='For the filter step, what to filter '
+                             '(default: all)')
     parser.add_argument('--save-plots', action='store_true',
                         help='Save plots to the output directory')
     parser.add_argument('--plots-dir',
@@ -134,18 +140,19 @@ def _preprocessing_command(args: argparse.Namespace) -> int:
     logger.info(f"Logging to {log_file}")
 
     try:
-        results = run_preprocessing(config,
-                                    wells=None if args.all_wells else [args.well],
-                                    steps=args.steps,
-                                    components=resolve_components(args),
-                                    save_plots=args.save_plots,
-                                    plots_dir=args.plots_dir,
-                                    continue_on_error=args.continue_on_error)
+        result = run_preprocessing(config,
+                                   wells=None if args.all_wells else [args.well],
+                                   steps=args.steps,
+                                   components=resolve_components(args),
+                                   targets=args.targets,
+                                   save_plots=args.save_plots,
+                                   plots_dir=args.plots_dir,
+                                   continue_on_error=args.continue_on_error)
     except Exception as e:
         logger.error(f"Preprocessing failed: {e}", exc_info=True)
         return 1
 
-    return 1 if any(r.error for r in results) else 0
+    return 1 if result.failed else 0
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:

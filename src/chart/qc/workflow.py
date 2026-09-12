@@ -16,6 +16,7 @@ from ..io.config import (
     join_path,
     load_bywell_config
 )
+from ..io.filters import FilterEntry, FilterManifest
 from .io import (
     SCALLOPS_AVAILABLE,
     load_objects,
@@ -80,9 +81,8 @@ def get_well_paths(config: Union[Dict[str, Any], BywellConfig], well: str) -> Di
     config = load_bywell_config(config)
     well_config = config.well(well)
 
-    # Reports and filters go to local output, not alongside the bulk data
-    filter_dir = join_path(config.local_output_dir, config.filter_dir)
-    qc_dir = join_path(config.local_output_dir, config.qc_dir)
+    filter_dir = config.filters_path
+    qc_dir = config.reports_path
 
     if not filter_dir.startswith('s3://'):
         os.makedirs(filter_dir, exist_ok=True)
@@ -94,7 +94,7 @@ def get_well_paths(config: Union[Dict[str, Any], BywellConfig], well: str) -> Di
         return join_path(config.scallops_dir, value) if value else ''
 
     return {
-        'objects_dir': join_path(config.data_output_dir, config.merged_dir),
+        'objects_dir': config.merged_path,
         'pheno_dir': scallops_path(well_config.pheno_dir),
         'pheno_to_sbs_dir': scallops_path(well_config.pheno_sbs_registered_dir),
         'sbs_dir': scallops_path(well_config.sbs_dir),
@@ -149,6 +149,8 @@ def process_well(config: Union[Dict[str, Any], BywellConfig],
                           total_objects=len(objects),
                           sgrna_assigned=int(sgRNA_count))
 
+    filter_entries: List[FilterEntry] = []
+
     # Plot size distributions
     if _enabled(components, 'plots'):
         logger.info("Plotting nuclear and cell size distributions...")
@@ -164,7 +166,9 @@ def process_well(config: Union[Dict[str, Any], BywellConfig],
             save_plots=save_plots,
             output_dir=plots_dir
         )
-        save_segmentation_filters(high_ratio_errors, well, paths['filter_dir'])
+        entry = save_segmentation_filters(high_ratio_errors, well, paths['filter_dir'])
+        if entry is not None:
+            filter_entries.append(entry)
         result.segmentation_errors = int(high_ratio_errors.sum())
 
     dapi_channel_names = well_config.dapi_channel_names
@@ -233,9 +237,23 @@ def process_well(config: Union[Dict[str, Any], BywellConfig],
         if phenocor_labels is None and phenosbscor_labels is None:
             logger.warning(f"No correlation filters were produced for well {well}; "
                            f"nothing to save beyond any precomputed filters")
-        save_filters(phenocor_labels, phenosbscor_labels, well, paths['filter_dir'])
+        filter_entries += save_filters(phenocor_labels, phenosbscor_labels,
+                                       well, paths['filter_dir'])
         if config.precomputed_filters:
-            load_precomputed_filters(config.precomputed_filters, well, paths['filter_dir'])
+            filter_entries += load_precomputed_filters(config.precomputed_filters,
+                                                       well, paths['filter_dir'])
+
+    # Record what was produced, so filtering does not have to infer it from
+    # the filenames that happen to be on disk.  Written only when something
+    # was produced, to leave an earlier run's manifest intact.
+    if filter_entries:
+        FilterManifest(
+            well=well,
+            components_run=[c for c in COMPONENTS
+                            if _enabled(components, c) and c not in result.skipped],
+            components_skipped=list(result.skipped),
+            filters=filter_entries
+        ).save(paths['filter_dir'])
 
     logger.info(f"Quality control analysis completed for well {well}")
     return result

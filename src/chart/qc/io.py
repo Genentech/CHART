@@ -8,8 +8,11 @@ modules stay free of I/O concerns.
 
 import os
 import logging
+from typing import Optional
 
 import pandas as pd
+
+from ..io.filters import EXCLUSION, INCLUSION, FilterEntry
 
 logger = logging.getLogger(__name__)
 
@@ -97,71 +100,87 @@ def load_sbs_objects(sbs_feature_dir, well, objects):
     return sbs_objects
 
 
-def load_precomputed_filters(precomputed_config, well, output_dir):
-    """Load precomputed filter files from an upstream pipeline and save locally."""
-    if not precomputed_config:
-        return
-
+def _save_label_list(labels, well, output_dir, name, role):
+    """Write one filter list and describe it for the manifest."""
     os.makedirs(output_dir, exist_ok=True)
+    filename = f"{well}_{name}.parquet"
+    pd.DataFrame({'label': labels}).to_parquet(os.path.join(output_dir, filename))
+    logger.info(f"Saved {role} filter '{name}': {len(labels)} labels")
+    return FilterEntry(name=name, role=role, file=filename, labels=len(labels))
+
+
+def load_precomputed_filters(precomputed_config, well, output_dir):
+    """Load precomputed filter files from an upstream pipeline and save locally.
+
+    Each entry maps a filter name to a dict with ``path``, optionally
+    ``file_pattern``, ``threshold_column`` and ``threshold`` to select rows,
+    and ``role`` to say whether the surviving labels are to be included or
+    excluded (default: included).
+
+    Returns:
+        A :class:`~chart.io.filters.FilterEntry` per filter written.
+    """
+    if not precomputed_config:
+        return []
+
+    entries = []
     for filter_name, cfg in precomputed_config.items():
         file_pattern = cfg.get('file_pattern', '{well}-objects.parquet')
         filter_path = os.path.join(cfg['path'], file_pattern.format(well=well))
         threshold_col = cfg.get('threshold_column', None)
         threshold_val = cfg.get('threshold', None)
+        role = cfg.get('role', INCLUSION)
         logger.info(f"Loading precomputed filter '{filter_name}' from {filter_path}")
-        try:
-            df = pd.read_parquet(filter_path)
-            total = len(df)
 
-            if threshold_col and threshold_val is not None:
-                df = df.dropna(subset=[threshold_col])
-                df = df[df[threshold_col] >= threshold_val]
-                logger.info(f"  Thresholded {threshold_col} >= {threshold_val}: "
-                            f"{len(df)}/{total} pass ({len(df)/total*100:.1f}%)")
+        df = pd.read_parquet(filter_path)
+        total = len(df)
 
-            labels = pd.DataFrame({'label': df.index})
-            out_path = os.path.join(output_dir, f"{well}_{filter_name}.parquet")
-            labels.to_parquet(out_path)
-            logger.info(f"  Saved {len(labels)} passing labels → {out_path}")
-        except Exception as e:
-            logger.warning(f"  could not load precomputed filter '{filter_name}': {e}")
+        if threshold_col and threshold_val is not None:
+            df = df.dropna(subset=[threshold_col])
+            df = df[df[threshold_col] >= threshold_val]
+            logger.info(f"  Thresholded {threshold_col} >= {threshold_val}: "
+                        f"{len(df)}/{total} pass ({len(df)/total*100:.1f}%)")
+
+        entries.append(_save_label_list(df.index, well, output_dir,
+                                        filter_name, role))
+
+    return entries
 
 
 def save_filters(phenocor_labels, phenosbscor_labels, well, output_dir):
-    """Save filter labels to parquet files."""
-    os.makedirs(output_dir, exist_ok=True)
-    
+    """Save the correlation filter lists.
+
+    Returns:
+        A :class:`~chart.io.filters.FilterEntry` per list written.  A list
+        given as ``None`` was not produced and is not written.
+    """
+    entries = []
     if phenocor_labels is not None:
-        phenocor_df = pd.DataFrame(phenocor_labels)
-        phenocor_path = os.path.join(output_dir, f"{well}_phenocorfilt.parquet")
-        phenocor_df.to_parquet(phenocor_path)
-        logger.info(f"Saved pheno correlation filter: {phenocor_path}")
-    
+        entries.append(_save_label_list(phenocor_labels, well, output_dir,
+                                        'phenocorfilt', INCLUSION))
     if phenosbscor_labels is not None:
-        phenosbscor_df = pd.DataFrame(phenosbscor_labels)
-        phenosbscor_path = os.path.join(output_dir, f"{well}_phenosbscorfilt.parquet")
-        phenosbscor_df.to_parquet(phenosbscor_path)
-        logger.info(f"Saved pheno-SBS correlation filter: {phenosbscor_path}")
+        entries.append(_save_label_list(phenosbscor_labels, well, output_dir,
+                                        'phenosbscorfilt', INCLUSION))
+    return entries
 
 
 def save_segmentation_filters(high_ratio_errors: pd.Series,
-                            well: str,
-                            output_dir: str) -> None:
-    """
-    Save segmentation error filters to parquet files.
-    
+                              well: str,
+                              output_dir: str) -> Optional[FilterEntry]:
+    """Save the labels with an implausible cytosol-to-nucleus ratio.
+
     Args:
-        high_ratio_errors: Boolean Series for high ratio errors
+        high_ratio_errors: Boolean Series, True for objects to exclude
         well: Well identifier
         output_dir: Directory to save filter files
+
+    Returns:
+        A :class:`~chart.io.filters.FilterEntry`, or ``None`` when no object
+        was flagged and so no file was written.
     """
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Save high ratio errors filter
-    if high_ratio_errors.any():
-        # Create DataFrame with 'label' column containing the problematic labels
-        problematic_labels = high_ratio_errors[high_ratio_errors].index
-        high_ratio_df = pd.DataFrame({'label': problematic_labels})
-        high_ratio_path = os.path.join(output_dir, f'{well}_high_ratio_segmentation_errors.parquet')
-        high_ratio_df.to_parquet(high_ratio_path)
-        logger.info(f"Saved high ratio segmentation errors filter: {high_ratio_path}")
+    if not high_ratio_errors.any():
+        return None
+
+    return _save_label_list(high_ratio_errors[high_ratio_errors].index,
+                            well, output_dir,
+                            'high_ratio_segmentation_errors', EXCLUSION)
