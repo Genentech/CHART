@@ -2,7 +2,11 @@
 Object and feature filtering for CHART.
 """
 
-from .features import filter_features, merge_objects_features
+from .features import (
+    NoFeaturesError,
+    filter_features,
+    merge_objects_features
+)
 from .io import load_filter_lists
 from .labels import apply_filters, arrange_index
 from .workflow import (
@@ -23,5 +27,6 @@ __all__ = [
     'apply_filters',
     'arrange_index',
     'filter_features',
+    'NoFeaturesError',
     'merge_objects_features'
 ]

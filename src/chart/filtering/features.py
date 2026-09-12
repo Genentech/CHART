@@ -18,6 +18,10 @@ EXCLUDE_PATTERNS = ('bbox', 'centroid', 'location', 'centermass',
                     'to_origin', '_x', '_y', 'orientation')
 
 
+class NoFeaturesError(ValueError):
+    """Column selection left no feature columns."""
+
+
 def filter_features(features: pd.DataFrame,
                     keep_prefixes: Sequence[str] = KEEP_PREFIXES,
                     exclude_patterns: Optional[Sequence[str]] = None) -> pd.DataFrame:
@@ -34,6 +38,9 @@ def filter_features(features: pd.DataFrame,
 
     Returns:
         The DataFrame with only the retained columns.
+
+    Raises:
+        NoFeaturesError: if no column survives the selection
     """
     if exclude_patterns is None:
         exclude_patterns = EXCLUDE_PATTERNS
@@ -43,15 +50,47 @@ def filter_features(features: pd.DataFrame,
     # Note: this matches the prefix anywhere in the column name rather than
     # only at the start, because that is what the upstream cellmapp code did
     # and anchoring it could drop columns that are currently kept.
-    features = features.filter(regex='|'.join(keep_prefixes))
-    logger.debug(f"After prefix filtering: {len(features.columns)} columns")
+    matched = features.filter(regex='|'.join(keep_prefixes))
+    logger.debug(f"After prefix filtering: {len(matched.columns)} columns")
 
+    kept, removed_by = matched, {}
     for pattern in exclude_patterns:
-        features = features[[col for col in features.columns if pattern not in col]]
-        logger.debug(f"After removing '{pattern}': {len(features.columns)} columns")
+        before = len(kept.columns)
+        kept = kept[[col for col in kept.columns if pattern not in col]]
+        if len(kept.columns) < before:
+            removed_by[pattern] = before - len(kept.columns)
+        logger.debug(f"After removing '{pattern}': {len(kept.columns)} columns")
 
-    logger.info(f"Feature filtering: {original_columns} -> {len(features.columns)} columns")
-    return features
+    if not len(kept.columns):
+        raise NoFeaturesError(_no_features_message(
+            features, matched, removed_by, keep_prefixes, exclude_patterns))
+
+    logger.info(f"Feature filtering: {original_columns} -> {len(kept.columns)} columns")
+    return kept
+
+
+def _no_features_message(features: pd.DataFrame,
+                         matched: pd.DataFrame,
+                         removed_by: dict,
+                         keep_prefixes: Sequence[str],
+                         exclude_patterns: Sequence[str]) -> str:
+    """Say which half of the selection emptied the table."""
+    if not len(matched.columns):
+        sample = ', '.join(str(col) for col in features.columns[:5])
+        if len(features.columns) > 5:
+            sample += f", and {len(features.columns) - 5} more"
+        return (f"No feature columns: none of the {len(features.columns)} "
+                f"columns contain any of the prefixes "
+                f"{', '.join(keep_prefixes)}. Columns seen: "
+                f"{sample or 'none'}.")
+
+    return (f"No feature columns: the prefixes matched "
+            f"{len(matched.columns)} columns and the exclude patterns "
+            f"removed all of them ("
+            + ', '.join(f"'{pattern}' removed {count}"
+                        for pattern, count in removed_by.items())
+            + f"). Narrow exclude_patterns, currently "
+              f"{', '.join(exclude_patterns)}.")
 
 
 def merge_objects_features(objects: pd.DataFrame,

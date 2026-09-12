@@ -12,7 +12,8 @@ from typing import Any, Dict, List, Optional, Sequence, Union
 
 from ..io.config import BywellConfig, load_bywell_config
 from .features import filter_features, merge_objects_features
-from .io import load_filter_lists, load_table, rename_columns, save_table
+from ..io.tables import load_table, save_table
+from .io import load_filter_lists, rename_columns
 from .labels import apply_filters, arrange_index, drop_unassigned
 
 logger = logging.getLogger(__name__)
@@ -149,6 +150,7 @@ def _process_premerged(config: BywellConfig,
 def run_filtering(config: Union[Dict[str, Any], BywellConfig],
                   wells: Optional[Sequence[str]] = None,
                   targets: Sequence[str] = ('all',),
+                  require_filters: Optional[bool] = None,
                   continue_on_error: bool = False) -> List[WellFilterResult]:
     """Apply the QC filters across wells.
 
@@ -156,17 +158,20 @@ def run_filtering(config: Union[Dict[str, Any], BywellConfig],
         config: A :class:`~chart.io.config.BywellConfig`, or a
                 configuration mapping to build one from
         wells: Wells to process; ``None`` processes every well in the
-               config.  Naming wells explicitly makes their filter lists
-               mandatory, so a well QC never filtered is an error rather
-               than a skip.
+               config
         targets: What to filter; ``('all',)`` does everything
+        require_filters: Fail when a well has no filter lists.  The default
+                         requires them only when *wells* was given, so
+                         naming a well makes its filters mandatory while a
+                         config-supplied list tolerates a gap
         continue_on_error: Log and carry on when a well fails
 
     Returns:
         One :class:`WellFilterResult` per well, in the order processed.
     """
     config = load_bywell_config(config)
-    require_filters = wells is not None
+    if require_filters is None:
+        require_filters = wells is not None
 
     if wells is None:
         wells = config.well_names()

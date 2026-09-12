@@ -13,11 +13,18 @@ authors = [{ name = "Genentech, Inc." }]
 dynamic = ["version"]
 dependencies = [
     "matplotlib",
+    "numba",
     "numpy",
     "pandas",
     "pyyaml",
+    "scikit-learn",
     "scipy",
+    "seaborn",
 ]
+
+# numba compiles the quantile normalisation kernel.  It supports a narrower
+# range of numpy versions than anything else here, so it is the dependency
+# most likely to constrain an install; see OPEN_ISSUES.md for the way out.
 
 # scallops supplies the readers for registered images.  It is not published
 # on PyPI, so it has to be installed separately; without it CHART skips the

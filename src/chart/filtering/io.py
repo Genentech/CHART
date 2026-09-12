@@ -82,20 +82,3 @@ def rename_columns(data: pd.DataFrame,
     return data
 
 
-def load_table(input_dir: str, well: str, suffix: str = '') -> pd.DataFrame:
-    """Read ``{well}{suffix}.parquet`` from *input_dir*."""
-    path = os.path.join(input_dir, f"{well}{suffix}.parquet")
-    logger.info(f"Reading {path}")
-    data = pd.read_parquet(path)
-    logger.info(f"Loaded {len(data)} rows, {len(data.columns)} columns")
-    return data
-
-
-def save_table(data: pd.DataFrame, output_dir: str, well: str,
-               suffix: str = '') -> str:
-    """Write *data* to ``{well}{suffix}.parquet`` in *output_dir*."""
-    os.makedirs(output_dir, exist_ok=True)
-    path = os.path.join(output_dir, f"{well}{suffix}.parquet")
-    data.to_parquet(path)
-    logger.info(f"Saved {len(data)} rows to {path}")
-    return path

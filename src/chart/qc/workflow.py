@@ -243,17 +243,20 @@ def process_well(config: Union[Dict[str, Any], BywellConfig],
             filter_entries += load_precomputed_filters(config.precomputed_filters,
                                                        well, paths['filter_dir'])
 
-    # Record what was produced, so filtering does not have to infer it from
-    # the filenames that happen to be on disk.  Written only when something
-    # was produced, to leave an earlier run's manifest intact.
-    if filter_entries:
-        FilterManifest(
-            well=well,
-            components_run=[c for c in COMPONENTS
-                            if _enabled(components, c) and c not in result.skipped],
-            components_skipped=list(result.skipped),
-            filters=filter_entries
-        ).save(paths['filter_dir'])
+    # Written even when nothing was produced: an empty manifest says this
+    # run made no filters, which an absent one cannot distinguish from an
+    # earlier run's.
+    FilterManifest(
+        well=well,
+        components_run=[c for c in COMPONENTS
+                        if _enabled(components, c) and c not in result.skipped],
+        components_skipped=list(result.skipped),
+        filters=filter_entries
+    ).save(paths['filter_dir'])
+    if not filter_entries:
+        logger.warning(f"No filters were produced for well {well}; the "
+                       f"manifest records that, so filtering will not apply "
+                       f"an earlier run's")
 
     logger.info(f"Quality control analysis completed for well {well}")
     return result

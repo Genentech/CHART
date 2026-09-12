@@ -118,12 +118,24 @@ SECTION_NAME = 'preprocessing_bywell'
 # loader can stay quiet about them: warning on every key CHART does not read
 # would bury the warnings that matter under a dozen false alarms, since the
 # configuration file is shared across stages.
-_OTHER_STAGE_TOP_LEVEL = frozenset({'preprocessing_allwells', 'guide_filtering'})
+_OTHER_STAGE_TOP_LEVEL = frozenset({'guide_filtering'})
 _OTHER_STAGE_SECTION = frozenset({'barcode_file', 'labels', 'feature_types'})
 _OTHER_STAGE_WELL = frozenset({'feature_dir', 'reads_file_pattern', 'reads_file',
                                'filter_duplicates', 'barcode_colname'})
 
-_TOP_LEVEL_KEYS = frozenset({'data_output_dir', 'local_output_dir', SECTION_NAME})
+ALLWELLS_SECTION = 'preprocessing_allwells'
+
+# Every key of the across-wells section is now read, so there is nothing
+# left to hold back from validation.
+_LATER_STEP_ALLWELLS = frozenset()
+_ALLWELLS_KEYS = frozenset({'combined_dir', 'normalized_dir', 'plot_dir',
+                            'normalization_type', 'filter_dir',
+                            'outlier_filtered_dir', 'contamination',
+                            'random_state', 'n_estimators',
+                            'missing_value_threshold', 'rcv_threshold'})
+
+_TOP_LEVEL_KEYS = frozenset({'data_output_dir', 'local_output_dir',
+                             SECTION_NAME, ALLWELLS_SECTION})
 _SECTION_KEYS = frozenset({'scallops_dir', 'merged_dir', 'filter_dir', 'qc_dir',
                            'filtered_output_dir', 'premerged', 'column_mapping',
                            'column_prefix_mapping', 'exclude_patterns',
@@ -218,6 +230,64 @@ class BywellConfig:
         return list(self.wells)
 
 
+@dataclass
+class AllwellsConfig:
+    """The across-wells preprocessing settings, with their defaults."""
+    data_output_dir: str
+    local_output_dir: str
+    combined_dir: str = 'preprocessing/allwells/combined/'
+    normalized_dir: str = 'preprocessing/allwells/normalized/'
+    outlier_filtered_dir: str = 'preprocessing/allwells/outlier_filtered/'
+    filter_dir: str = 'preprocessing/allwells/filters/'
+    plot_dir: str = 'preprocessing/allwells/plots/'
+    normalization_type: str = 'quantile'
+
+    # Outlier detection.  'auto' lets IsolationForest choose how many cells
+    # to flag; a float fixes the proportion.
+    contamination: Union[str, float] = 'auto'
+    random_state: int = 42
+    n_estimators: int = 100
+
+    # Column and row prefilters applied before outlier detection.  The missing-value
+    # threshold is a count, not a fraction, which is why its default rarely
+    # removes anything; see OPEN_ISSUES.md.
+    missing_value_threshold: int = 100000
+    rcv_threshold: float = 0.01
+
+    # Bulk data goes to data_output_dir; plots and filter lists stay local,
+    # as in the by-well half.
+    @property
+    def combined_path(self) -> str:
+        return join_path(self.data_output_dir, self.combined_dir)
+
+    @property
+    def normalized_path(self) -> str:
+        return join_path(self.data_output_dir, self.normalized_dir)
+
+    @property
+    def outlier_filtered_path(self) -> str:
+        return join_path(self.data_output_dir, self.outlier_filtered_dir)
+
+    @property
+    def filters_path(self) -> str:
+        return join_path(self.local_output_dir, self.filter_dir)
+
+    @property
+    def plots_path(self) -> str:
+        return join_path(self.local_output_dir, self.plot_dir)
+
+
+@dataclass
+class PreprocessingConfig:
+    """Both halves of the preprocessing stage.
+
+    The by-well steps and the across-wells steps read different sections
+    of the same file, so the stage needs both.
+    """
+    bywell: BywellConfig
+    allwells: AllwellsConfig
+
+
 _THRESHOLD_KEYS = frozenset(f.name for f in fields(Thresholds))
 _WELL_KEYS = frozenset(f.name for f in fields(WellConfig)) - {'well'}
 
@@ -283,7 +353,8 @@ def load_bywell_config(source: Union[str, Dict[str, Any], BywellConfig]) -> Bywe
         # A flat configuration, holding the by-well settings at the top level.
         section = config
         _warn_unknown(config, _TOP_LEVEL_KEYS | _SECTION_KEYS | _THRESHOLD_KEYS,
-                      _OTHER_STAGE_TOP_LEVEL | _OTHER_STAGE_SECTION, 'the top level')
+                      _OTHER_STAGE_TOP_LEVEL | _OTHER_STAGE_SECTION
+                      | _ALLWELLS_KEYS | _LATER_STEP_ALLWELLS, 'the top level')
 
     for key in ('data_output_dir', 'local_output_dir'):
         if not config.get(key):
@@ -317,3 +388,57 @@ def load_bywell_config(source: Union[str, Dict[str, Any], BywellConfig]) -> Bywe
                     wells=wells,
                     defaults=defaults,
                     **known_section)
+
+
+def load_allwells_config(source: Union[str, Dict[str, Any], AllwellsConfig]) -> AllwellsConfig:
+    """Build an :class:`AllwellsConfig` from a file path or a mapping.
+
+    Only the across-wells section is checked here; the top level is the
+    concern of :func:`load_bywell_config`, which would otherwise report the
+    same keys twice.
+    """
+    if isinstance(source, AllwellsConfig):
+        return source
+
+    config = load_config_from_file(source) if isinstance(source, str) else source
+    if not isinstance(config, dict):
+        raise ValueError(f"Configuration must be a mapping, got {type(config).__name__}")
+
+    section = config.get(ALLWELLS_SECTION)
+    if section is None:
+        # A flat configuration, or one that simply leaves these at their
+        # defaults.  Either way there is no section to check.
+        section = {}
+    elif not isinstance(section, dict):
+        raise ValueError(f"'{ALLWELLS_SECTION}' is present but holds no settings; "
+                         f"remove it or fill it in")
+    else:
+        _warn_unknown(section, _ALLWELLS_KEYS, _LATER_STEP_ALLWELLS, ALLWELLS_SECTION)
+
+    return AllwellsConfig(data_output_dir=config.get('data_output_dir', ''),
+                          local_output_dir=config.get('local_output_dir', ''),
+                          **{k: v for k, v in section.items() if k in _ALLWELLS_KEYS})
+
+
+def load_preprocessing_config(
+        source: Union[str, Dict[str, Any], BywellConfig, PreprocessingConfig]
+) -> PreprocessingConfig:
+    """Build a :class:`PreprocessingConfig` from a file path or a mapping.
+
+    A :class:`BywellConfig` is also accepted, for callers that only run the
+    by-well steps.  There is no mapping left to read the across-wells
+    section from in that case, so those settings take their defaults.
+    """
+    if isinstance(source, PreprocessingConfig):
+        return source
+
+    if isinstance(source, BywellConfig):
+        return PreprocessingConfig(
+            bywell=source,
+            allwells=AllwellsConfig(data_output_dir=source.data_output_dir,
+                                    local_output_dir=source.local_output_dir)
+        )
+
+    config = load_config_from_file(source) if isinstance(source, str) else source
+    return PreprocessingConfig(bywell=load_bywell_config(config),
+                               allwells=load_allwells_config(config))
