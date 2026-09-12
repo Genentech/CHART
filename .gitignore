@@ -1,0 +1,9 @@
+# Working notes, not for the repo
+OPEN_ISSUES.md
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
