@@ -1,0 +1,17 @@
+CAT
+FAK
+EEA1
+rpS6
+LAMP1
+CALR
+Ki67
+Phalloidin
+G3BP1
+CTNNB1
+ERa
+pH2AX
+Golgin97
+TOM20
+DAPI1
+B-Tubulin
+Fibrillarin

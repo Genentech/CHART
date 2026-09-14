@@ -1,0 +1,115 @@
+---
+title: "Investigate channel-specific AA"
+output: html_document
+date: "2026-02-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# library(SuperCells)
+
+library(archetypes)
+
+indir = "/gstore/data/marioni_group/Carolina/CP2.0/ArchetypeAnalysis/tmp_archetype_outputs/"
+channel = 'Golgin97'
+gamma = 30
+k.knn = 10
+n.pc = 10
+
+K = 17
+```
+
+
+```{r}
+aa_path <- paste0(indir,channel,"/archetype_robust_runs_gamma",gamma,"_knn",k.knn,"_npc",n.pc,".rds")
+
+res <- readRDS(aa_path)
+rK <- res$results[[as.character(K)]]
+
+# Best run by eval-RSS
+Z_ref <- rK$Z_ref              # matrix K x d
+ref_run <- rK$ref_run          # integer
+
+# Optional: sanity checks
+stopifnot(is.matrix(Z_ref), nrow(Z_ref) == K)
+
+Z_ref
+```
+
+Refit with more reruns to the whole metacell space
+
+```{r}
+library(arrow)
+
+# Paths (edit as needed)
+coord_path <- file.path(indir, channel,
+                        sprintf("supercells-%s_gamma%s_knn%s_npc%s.parquet", channel, gamma, k.knn, n.pc))
+
+# Load full metacell coordinates (n_metacells x npc)
+X <- as.matrix(read_parquet(coord_path))
+
+# # Match your AA convention
+# Xs <- scale(X)
+
+set.seed(1)
+bm_full <- bestModel(stepArchetypes(X, k = K, nrep = 20, verbose = FALSE))
+
+Z_full_fit <- parameters(bm_full)   # K x npc
+rss_full_train <- rss(bm_full)
+
+list(model = bm_full, Z = Z_full_fit, rss_train = rss_full_train)
+```
+
+Extract model
+
+```{r}
+# final_archetypes <- bestModel(archetypes[[k-1]])
+# rm(archetypes); gc()
+final_archetypes <- bm_full
+head(final_archetypes$alphas)
+```
+
+Load single cell PCA space
+
+```{r}
+library(arrow)
+# pca <- readRDS(paste0("tmp_archetype_outputs/",channel,"/cell_pca_centered_pw.parquet"))$scores
+pca <- as.data.frame(read_parquet(paste0("tmp_archetype_outputs/",channel,"/cell_pca_centered.parquet")))
+metadata <- pca[,tail(colnames(pca),4)]
+cell_id <- paste(pca$Well, pca$Label, sep = "-")
+rownames(pca) <- cell_id
+pca <- pca[,1:(ncol(pca)-4)]
+```
+
+Predict weights in single cell PCA space
+
+```{r}
+sc_prediction <- predict(final_archetypes, pca[,1:ncol(final_archetypes$archetypes)])
+colnames(sc_prediction) <- paste0("Archetype",1:K)
+rownames(sc_prediction) <- rownames(pca)
+
+pdf(paste0('tmp_archetype_outputs/',channel,'/robust_archweights-',channel,
+           '_k',K,'_gamma',gamma,'_knn',k.knn,'_npc',n.pc,'.pdf'))
+for(a in colnames(sc_prediction)){
+  print(plot(density(sc_prediction[,a]),
+             main = paste(channel, a)))
+}
+dev.off()
+```
+
+Save to file
+
+```{r}
+write.data <- cbind.data.frame(as.data.frame(sc_prediction),metadata)
+dir.create(paste0(indir,channel))
+write_parquet(write.data,
+              paste0(indir,channel,'/robust_archweights-',channel,
+                     '_k',K,'_gamma',gamma,'_knn',k.knn,'_npc',n.pc,'.parquet'))
+# write_parquet(write.data,
+#               paste0('s3://bigdipir-ctg-s3/internal/singa166-lab/Carolina/cellmapp/archetypes_test/quick_archetypes/',
+#                      channel,'/k',k,'_gamma',gamma,'_knn',k.knn,'_npc',n.pc,
+#                      '/archweights-',channel,'_k',k,'_gamma',gamma,'_knn',
+#                      k.knn,'_npc',n.pc,'.parquet'))
+rm(write.data); gc()
+```
+
