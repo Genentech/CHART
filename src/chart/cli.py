@@ -221,6 +221,17 @@ def _preprocessing_command(args: argparse.Namespace) -> int:
         for level, path in outliers.aggregated.items():
             logger.info(f"Aggregated to {level} level → {path}")
 
+    guides = result.guides
+    if guides is not None and guides.output:
+        logger.info(f"Guides dropped: {guides.control_outliers} control of "
+                    f"{guides.controls}, {guides.perturbation_outliers} of "
+                    f"{guides.guides_scored} scored, "
+                    f"{guides.low_cell_guides} below the cell minimum")
+        logger.info(f"Guide filtered: {guides.cells_in} → {guides.cells_out} "
+                    f"cells → {guides.output}")
+        for level, path in guides.aggregated.items():
+            logger.info(f"Aggregated to {level} level → {path}")
+
     return 1 if result.failed else 0
 
 

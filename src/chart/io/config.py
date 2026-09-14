@@ -118,7 +118,7 @@ SECTION_NAME = 'preprocessing_bywell'
 # loader can stay quiet about them: warning on every key CHART does not read
 # would bury the warnings that matter under a dozen false alarms, since the
 # configuration file is shared across stages.
-_OTHER_STAGE_TOP_LEVEL = frozenset({'guide_filtering'})
+_OTHER_STAGE_TOP_LEVEL = frozenset()
 _OTHER_STAGE_SECTION = frozenset({'barcode_file', 'labels', 'feature_types'})
 _OTHER_STAGE_WELL = frozenset({'feature_dir', 'reads_file_pattern', 'reads_file',
                                'filter_duplicates', 'barcode_colname'})
@@ -134,8 +134,17 @@ _ALLWELLS_KEYS = frozenset({'combined_dir', 'normalized_dir', 'plot_dir',
                             'random_state', 'n_estimators',
                             'missing_value_threshold', 'rcv_threshold'})
 
+GUIDE_SECTION = 'guide_filtering'
+
+# cellmapp calls the guide step's own output directory 'outlier_filtered_dir',
+# copied from the across-wells section where it means the input.  The name is
+# kept so one configuration file still serves both codebases; the property
+# below gives it an accurate name on our side.
+_GUIDE_KEYS = frozenset({'filter_dir', 'plot_dir', 'outlier_filtered_dir',
+                         'cosine_similarity_threshold', 'min_cells_per_guide'})
+
 _TOP_LEVEL_KEYS = frozenset({'data_output_dir', 'local_output_dir',
-                             SECTION_NAME, ALLWELLS_SECTION})
+                             SECTION_NAME, ALLWELLS_SECTION, GUIDE_SECTION})
 _SECTION_KEYS = frozenset({'scallops_dir', 'merged_dir', 'filter_dir', 'qc_dir',
                            'filtered_output_dir', 'premerged', 'column_mapping',
                            'column_prefix_mapping', 'exclude_patterns',
@@ -278,14 +287,45 @@ class AllwellsConfig:
 
 
 @dataclass
-class PreprocessingConfig:
-    """Both halves of the preprocessing stage.
+class GuideConfig:
+    """The guide filtering settings, with their defaults.
 
-    The by-well steps and the across-wells steps read different sections
-    of the same file, so the stage needs both.
+    The step's input is the outlier step's output, so it is read from
+    :class:`AllwellsConfig` rather than named here.
+    """
+    data_output_dir: str
+    local_output_dir: str
+    filter_dir: str = 'guide_filtering/filters/'
+    plot_dir: str = 'guide_filtering/plots/'
+    outlier_filtered_dir: str = 'guide_filtering/guide_filtered/'
+
+    cosine_similarity_threshold: float = 0.2
+    min_cells_per_guide: int = 50
+
+    @property
+    def guide_filtered_path(self) -> str:
+        """Where the guide-filtered tables go, named for what it holds."""
+        return join_path(self.data_output_dir, self.outlier_filtered_dir)
+
+    @property
+    def filters_path(self) -> str:
+        return join_path(self.local_output_dir, self.filter_dir)
+
+    @property
+    def plots_path(self) -> str:
+        return join_path(self.local_output_dir, self.plot_dir)
+
+
+@dataclass
+class PreprocessingConfig:
+    """The three halves of the preprocessing stage.
+
+    The by-well steps, the across-wells steps and the guide step read
+    different sections of the same file, so the stage needs all three.
     """
     bywell: BywellConfig
     allwells: AllwellsConfig
+    guides: GuideConfig
 
 
 _THRESHOLD_KEYS = frozenset(f.name for f in fields(Thresholds))
@@ -354,7 +394,8 @@ def load_bywell_config(source: Union[str, Dict[str, Any], BywellConfig]) -> Bywe
         section = config
         _warn_unknown(config, _TOP_LEVEL_KEYS | _SECTION_KEYS | _THRESHOLD_KEYS,
                       _OTHER_STAGE_TOP_LEVEL | _OTHER_STAGE_SECTION
-                      | _ALLWELLS_KEYS | _LATER_STEP_ALLWELLS, 'the top level')
+                      | _ALLWELLS_KEYS | _LATER_STEP_ALLWELLS | _GUIDE_KEYS,
+                      'the top level')
 
     for key in ('data_output_dir', 'local_output_dir'):
         if not config.get(key):
@@ -420,14 +461,41 @@ def load_allwells_config(source: Union[str, Dict[str, Any], AllwellsConfig]) -> 
                           **{k: v for k, v in section.items() if k in _ALLWELLS_KEYS})
 
 
+def load_guide_config(source: Union[str, Dict[str, Any], GuideConfig]) -> GuideConfig:
+    """Build a :class:`GuideConfig` from a file path or a mapping.
+
+    Only the guide filtering section is checked here, for the same reason
+    as :func:`load_allwells_config`.
+    """
+    if isinstance(source, GuideConfig):
+        return source
+
+    config = load_config_from_file(source) if isinstance(source, str) else source
+    if not isinstance(config, dict):
+        raise ValueError(f"Configuration must be a mapping, got {type(config).__name__}")
+
+    section = config.get(GUIDE_SECTION)
+    if section is None:
+        section = {}
+    elif not isinstance(section, dict):
+        raise ValueError(f"'{GUIDE_SECTION}' is present but holds no settings; "
+                         f"remove it or fill it in")
+    else:
+        _warn_unknown(section, _GUIDE_KEYS, frozenset(), GUIDE_SECTION)
+
+    return GuideConfig(data_output_dir=config.get('data_output_dir', ''),
+                       local_output_dir=config.get('local_output_dir', ''),
+                       **{k: v for k, v in section.items() if k in _GUIDE_KEYS})
+
+
 def load_preprocessing_config(
         source: Union[str, Dict[str, Any], BywellConfig, PreprocessingConfig]
 ) -> PreprocessingConfig:
     """Build a :class:`PreprocessingConfig` from a file path or a mapping.
 
     A :class:`BywellConfig` is also accepted, for callers that only run the
-    by-well steps.  There is no mapping left to read the across-wells
-    section from in that case, so those settings take their defaults.
+    by-well steps.  There is no mapping left to read the other sections
+    from in that case, so those settings take their defaults.
     """
     if isinstance(source, PreprocessingConfig):
         return source
@@ -436,9 +504,12 @@ def load_preprocessing_config(
         return PreprocessingConfig(
             bywell=source,
             allwells=AllwellsConfig(data_output_dir=source.data_output_dir,
-                                    local_output_dir=source.local_output_dir)
+                                    local_output_dir=source.local_output_dir),
+            guides=GuideConfig(data_output_dir=source.data_output_dir,
+                               local_output_dir=source.local_output_dir)
         )
 
     config = load_config_from_file(source) if isinstance(source, str) else source
     return PreprocessingConfig(bywell=load_bywell_config(config),
-                               allwells=load_allwells_config(config))
+                               allwells=load_allwells_config(config),
+                               guides=load_guide_config(config))

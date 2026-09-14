@@ -17,6 +17,7 @@ from .io.config import BywellConfig, PreprocessingConfig, load_preprocessing_con
 from .combining import CombineResult, run_combining
 from .filtering import WellFilterResult, run_filtering
 from .normalization import NormalizationResult, run_normalization
+from .guides import GuideResult, run_guide_filtering
 from .outliers import OutlierResult, run_outlier_filtering
 from .qc import WellQCResult, run_qc
 
@@ -27,7 +28,7 @@ logger = logging.getLogger(__name__)
 BYWELL_STEPS = ('qc', 'filter')
 
 #: Steps that run once over the whole well list.
-ALLWELLS_STEPS = ('combine', 'normalize', 'outliers')
+ALLWELLS_STEPS = ('combine', 'normalize', 'outliers', 'guides')
 
 #: cellmapp's outlier step aggregated to guide level unless told otherwise,
 #: while its normalise step never aggregated at all.  Both defaults are
@@ -55,6 +56,7 @@ class PreprocessingResult:
     combining: List[CombineResult] = field(default_factory=list)
     normalization: Optional[NormalizationResult] = None
     outliers: Optional[OutlierResult] = None
+    guides: Optional[GuideResult] = None
 
     @property
     def failed(self) -> List[str]:
@@ -63,7 +65,8 @@ class PreprocessingResult:
         failures = [r.well for r in (*self.qc, *self.filtering) if r.error]
         failures += [f"combine ({r.target})" for r in self.combining if r.error]
         for step, result in (('normalize', self.normalization),
-                             ('outliers', self.outliers)):
+                             ('outliers', self.outliers),
+                             ('guides', self.guides)):
             if result is not None and result.error:
                 failures.append(step)
         return failures
@@ -89,6 +92,32 @@ def _stale_outlier_input(normalization: Optional[NormalizationResult]) -> Option
             f"would be left over from an earlier run. Fix what stopped the "
             f"normalize step, or ask for outliers on its own if an older "
             f"table really is intended.")
+
+
+def _stale_guide_input(outliers: Optional[OutlierResult]) -> Optional[str]:
+    """Why guide filtering cannot trust its input, or ``None``.
+
+    The guides step reads both tables the outlier step writes, the cells
+    and the guide-level aggregation, so an outlier step that produced
+    neither leaves the previous run's for this step to read.
+    """
+    if outliers is None:
+        return None
+    if outliers.output and 'guide' in outliers.aggregated:
+        return None
+
+    if outliers.error:
+        reason = outliers.error
+    elif not outliers.output:
+        reason = 'it produced no output'
+    else:
+        reason = ('it did not aggregate to guide level, which this step '
+                  'reads')
+    return (f"Not filtering guides: the outliers step did not write what "
+            f"this step reads in this run ({reason}), so the only input "
+            f"available would be left over from an earlier run. Fix what "
+            f"stopped the outliers step, or ask for guides on its own if an "
+            f"older table really is intended.")
 
 
 def _stale_normalization_input(combining: Sequence[CombineResult]) -> Optional[str]:
@@ -356,5 +385,26 @@ def run_preprocessing(config: Union[str, Dict[str, Any], BywellConfig,
                     raise
                 logger.error(f"Outlier filtering failed: {exc}")
                 result.outliers = OutlierResult(error=str(exc))
+
+    if 'guides' in steps:
+        stale = _stale_guide_input(result.outliers)
+        if stale:
+            if not continue_on_error:
+                raise StaleInputError(stale)
+            logger.error(stale)
+            result.guides = GuideResult(error=stale)
+        else:
+            try:
+                result.guides = run_guide_filtering(
+                    config.allwells,
+                    config.guides,
+                    aggregation_method=aggregation_method,
+                    save_plots=save_plots,
+                    plots_dir=plots_dir)
+            except Exception as exc:
+                if not continue_on_error:
+                    raise
+                logger.error(f"Guide filtering failed: {exc}")
+                result.guides = GuideResult(error=str(exc))
 
     return result

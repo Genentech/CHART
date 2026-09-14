@@ -1,6 +1,10 @@
 # Working notes, not for the repo
 OPEN_ISSUES.md
 
+# Local workaround: the system sklearn is missing some of its own
+# dependencies, so they are installed here and put on PYTHONPATH to verify.
+.verifydeps/
+
 # Python
 __pycache__/
 *.py[cod]
