@@ -153,7 +153,9 @@ def _process_premerged(config: BywellConfig,
     result.objects_kept = result.features_kept = len(filtered)
     save_table(filtered, config.filtered_path, well, '-objects')
 
-    features = filter_features(filtered, exclude_patterns=config.exclude_patterns)
+    features = filter_features(filtered,
+                               keep_patterns=config.schema.feature_patterns,
+                               exclude_patterns=config.exclude_patterns)
     save_table(features, config.filtered_path, well, '-features')
     save_table(features, config.filtered_path, well)
     result.merged_written = True
