@@ -4,6 +4,12 @@ Quantile normalisation across wells.
 Every well's values for a feature are mapped onto the distribution of that
 feature pooled over the whole screen, so that per-well differences in
 staining or exposure do not survive into the analysis.
+
+Missing values are left out of the mapping and stay missing.  cellmapp
+ranked them instead, which sorted them to the top of their well and put
+them at the top of the pooled reference, so a missing value could come
+back as a plausible measurement and the largest real value in an
+unaffected well could come back missing.
 """
 
 import logging
@@ -43,46 +49,74 @@ def rank_average(series: np.ndarray) -> np.ndarray:
 
 
 @njit(parallel=True)
-def normalize_group(group: np.ndarray, sorted_reference: np.ndarray) -> np.ndarray:
+def normalize_group(group: np.ndarray, sorted_reference: np.ndarray,
+                    valid_counts: np.ndarray) -> np.ndarray:
     """Map one well's values onto the pooled distribution, per feature.
+
+    Missing values take no part in the mapping: they are neither ranked
+    within the well nor read from the reference, and they come back out
+    missing.
 
     Args:
         group: One well's values, ``(n_cells, n_features)``
         sorted_reference: The pooled values, sorted per feature,
-                          ``(n_total_cells, n_features)``
+                          ``(n_total_cells, n_features)``.  Sorting puts
+                          each feature's missing values last.
+        valid_counts: How many leading rows of each reference column are
+                      not missing, ``(n_features,)``
 
     Returns:
         The mapped values, shaped like *group*.
     """
     num_features = sorted_reference.shape[1]
-    num_sorted = sorted_reference.shape[0]
-    result = np.empty((num_features, group.shape[0]), dtype=sorted_reference.dtype)
+    num_cells = group.shape[0]
+    result = np.empty((num_features, num_cells), dtype=sorted_reference.dtype)
 
     for i in prange(num_features):
-        sorted_all_values = sorted_reference[:, i]
         series = group[:, i]
-        ranks = rank_average(series)
+
+        for j in range(num_cells):
+            result[i, j] = np.nan
+
+        present = np.empty(num_cells, dtype=np.int64)
+        num_present = 0
+        for j in range(num_cells):
+            if not np.isnan(series[j]):
+                present[num_present] = j
+                num_present += 1
+
+        num_valid = valid_counts[i]
+        if num_valid == 0 or num_present == 0:
+            continue
+
+        sorted_all_values = sorted_reference[:num_valid, i]
+        values = np.empty(num_present, dtype=sorted_reference.dtype)
+        for j in range(num_present):
+            values[j] = series[present[j]]
+
+        ranks = rank_average(values)
 
         rank_max = ranks.max()
         if rank_max == 0:
-            # One cell, so there is no ordering to map.  The reference
+            # One value, so there is no ordering to map.  The reference
             # median is the least misleading value available.
-            interpolated_values = np.full(series.shape[0],
+            interpolated_values = np.full(num_present,
                                           np.median(sorted_all_values))
         else:
             # Scale the ranks onto the reference.  Note this reaches
-            # num_sorted while the interpolation grid stops one short, so
+            # num_valid while the interpolation grid stops one short, so
             # the very top of each well is clamped to the largest reference
             # value.  Kept as cellmapp had it: correcting the scale would
             # shift every normalised value.
-            interp_x = ranks * (num_sorted / rank_max)
+            interp_x = ranks * (num_valid / rank_max)
             interpolated_values = np.interp(
                 interp_x,
-                np.arange(num_sorted),
+                np.arange(num_valid),
                 sorted_all_values
             )
 
-        result[i, :] = interpolated_values
+        for j in range(num_present):
+            result[i, present[j]] = interpolated_values[j]
 
     return result.T
 
@@ -102,11 +136,14 @@ def normalize_across_wells(data: pd.DataFrame,
 
     Returns:
         A table with the same index as *data*, holding the normalised
-        feature columns.  Columns outside *feature_columns* are dropped.
+        feature columns, missing in exactly the places *data* was.
+        Columns outside *feature_columns* are dropped.
 
     Raises:
         ValueError: if a well has fewer than :data:`MIN_CELLS_PER_WELL`
             cells, which cannot be ranked
+        RuntimeError: if normalisation did not preserve which values are
+            missing
     """
     if well_column not in (data.index.names or ()):
         raise KeyError(f"Cannot normalise across wells: the table has no "
@@ -142,8 +179,24 @@ def normalize_across_wells(data: pd.DataFrame,
     # float64 throughout: the kernel requires the group and the reference to
     # share a dtype, and np.interp returns float64 regardless.
     feature_values = data[feature_columns].to_numpy(dtype=np.float64)
+    missing = np.isnan(feature_values)
+
     logger.info("Building the pooled reference distribution...")
+    # np.sort puts missing values last, so each column's reference is its
+    # leading valid_counts[i] entries.
     sorted_reference = np.sort(feature_values, axis=0)
+    valid_counts = (~missing).sum(axis=0).astype(np.int64)
+
+    if missing.any():
+        affected = int((missing.any(axis=0)).sum())
+        logger.warning(
+            f"{int(missing.sum())} missing value(s) across {affected} of "
+            f"{len(feature_columns)} features take no part in normalisation "
+            f"and stay missing")
+    empty = [c for c, n in zip(feature_columns, valid_counts) if n == 0]
+    if empty:
+        logger.warning(f"{len(empty)} feature(s) have no values at all and "
+                       f"cannot be normalised: {', '.join(map(str, empty))}")
 
     # Results are written back into the original row positions rather than
     # concatenated per well, so the index keeps its order and its names.
@@ -151,7 +204,17 @@ def normalize_across_wells(data: pd.DataFrame,
     for well in wells:
         logger.info(f"Normalising well {well} ({counts[well]} cells)...")
         rows = well_labels == well
-        normalized[rows] = normalize_group(feature_values[rows], sorted_reference)
+        normalized[rows] = normalize_group(feature_values[rows],
+                                           sorted_reference, valid_counts)
+
+    # Normalisation reorders values within a feature; it must not create or
+    # remove them.  Checking is cheap next to the mapping itself.
+    if not np.array_equal(np.isnan(normalized), missing):
+        raise RuntimeError(
+            f"Normalisation changed which values are missing: "
+            f"{int(missing.sum())} missing before, "
+            f"{int(np.isnan(normalized).sum())} after. This is a bug in "
+            f"{__name__}.")
 
     result = pd.DataFrame(normalized, index=data.index, columns=feature_columns)
     logger.info(f"Quantile normalisation completed: {result.shape[0]} rows, "
