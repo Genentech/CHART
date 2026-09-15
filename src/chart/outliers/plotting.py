@@ -74,7 +74,8 @@ def plot_outlier_positions(outliers: pd.DataFrame, cell_data: pd.DataFrame,
                            output_dir: str,
                            wells: Optional[Sequence[str]] = None,
                            figsize: tuple = (7.5, 7),
-                           point_size: float = 0.5) -> None:
+                           point_size: float = 0.5,
+                           centroid_columns: Optional[Sequence[str]] = None) -> None:
     """Plot where the flagged cells sit within each well.
 
     Args:
@@ -89,7 +90,8 @@ def plot_outlier_positions(outliers: pd.DataFrame, cell_data: pd.DataFrame,
         logger.info("No outlier positions to plot")
         return
 
-    missing = [c for c in CENTROID_COLUMNS if c not in cell_data.columns]
+    columns = tuple(centroid_columns or CENTROID_COLUMNS)
+    missing = [c for c in columns if c not in cell_data.columns]
     if missing:
         logger.warning(f"Cannot plot outlier positions: the objects table has "
                        f"no {', '.join(missing)} column(s)")
@@ -99,7 +101,7 @@ def plot_outlier_positions(outliers: pd.DataFrame, cell_data: pd.DataFrame,
         wells = sorted(outliers['Well'].unique())
 
     logger.info(f"Plotting outlier positions for {len(wells)} well(s)...")
-    y_column, x_column = CENTROID_COLUMNS
+    y_column, x_column = columns
 
     for well in wells:
         in_well = cell_data[cell_data.index.get_level_values('Well') == well]

@@ -6,12 +6,13 @@ against the same gene.
 
 import logging
 from dataclasses import dataclass, field
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 import pandas as pd
 
-from ..dimred import CONTROL_GENE, GENE_LEVEL, control_mask
+from ..dimred import GENE_LEVEL, control_mask
+from ..io.config import SchemaConfig
 from .controls import GUIDE_LEVEL
 
 logger = logging.getLogger(__name__)
@@ -35,7 +36,8 @@ class SimilarityResult:
     unscored_guides: int = 0
 
 
-def guide_similarities(cosine: pd.DataFrame) -> SimilarityResult:
+def guide_similarities(cosine: pd.DataFrame,
+                       schema: Optional[SchemaConfig] = None) -> SimilarityResult:
     """Score each perturbation guide against the others targeting its gene.
 
     Args:
@@ -46,19 +48,20 @@ def guide_similarities(cosine: pd.DataFrame) -> SimilarityResult:
         :data:`SIMILARITY_COLUMN` and :data:`NTC_SIMILARITY_COLUMN`,
         indexed as *cosine*.
     """
+    schema = schema or SchemaConfig()
     genes = cosine.index.get_level_values(GENE_LEVEL)
     values = cosine.to_numpy()
 
-    ntc = np.asarray(genes == CONTROL_GENE)
+    ntc = np.asarray(genes == schema.control_gene)
     if not ntc.any():
-        logger.warning(f"No {CONTROL_GENE} guides, so "
+        logger.warning(f"No {schema.control_gene} guides, so "
                        f"'{NTC_SIMILARITY_COLUMN}' will be empty; it is only "
                        f"plotted, so the filtering is unaffected")
         ntc_means = np.full(len(cosine), np.nan)
     else:
         ntc_means = values[:, ntc].mean(axis=1)
 
-    targets = pd.unique(np.asarray(genes)[~control_mask(genes)])
+    targets = pd.unique(np.asarray(genes)[~control_mask(genes, schema)])
     logger.info(f"Scoring guides against {len(targets)} non-control gene(s)")
 
     result = SimilarityResult()

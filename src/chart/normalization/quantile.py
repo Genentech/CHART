@@ -130,9 +130,10 @@ def normalize_across_wells(data: pd.DataFrame,
         data: A table whose index includes *well_column*
         well_column: The index level naming the well
         feature_columns: Columns to normalise.  The default is every
-                         numeric column, so pass this explicitly if the
-                         table carries numeric identifiers that are not
-                         measurements.
+                         column, as the filter step has already reduced
+                         the table to the features the schema declared;
+                         pass this explicitly if the table carries
+                         numeric identifiers that are not measurements.
 
     Returns:
         A table with the same index as *data*, holding the normalised
@@ -140,6 +141,9 @@ def normalize_across_wells(data: pd.DataFrame,
         Columns outside *feature_columns* are dropped.
 
     Raises:
+        TypeError: if a column to normalise is not numeric.  Reaching
+            here means the schema declared it a feature, so it is a
+            mistake rather than something to leave out quietly.
         ValueError: if a well has fewer than :data:`MIN_CELLS_PER_WELL`
             cells, which cannot be ranked
         RuntimeError: if normalisation did not preserve which values are
@@ -152,10 +156,22 @@ def normalize_across_wells(data: pd.DataFrame,
 
     if feature_columns is None:
         feature_columns = data.select_dtypes(include=[np.number]).columns.tolist()
-        ignored = [c for c in data.columns if c not in feature_columns]
-        if ignored:
-            logger.info(f"Leaving out {len(ignored)} non-numeric column(s): "
-                        f"{', '.join(map(str, ignored))}")
+        rejected = [c for c in data.columns if c not in feature_columns]
+        if rejected:
+            described = []
+            for col in rejected[:5]:
+                sample = list(data[col].dropna().unique()[:3])
+                described.append(f"'{col}' is {data[col].dtype}, "
+                                 + (f"holding {sample}" if sample
+                                    else "entirely missing"))
+            if len(rejected) > 5:
+                described.append(f"and {len(rejected) - 5} more")
+            raise TypeError(
+                f"{len(rejected)} of the {len(data.columns)} columns to "
+                f"normalise hold something other than numbers: "
+                f"{'; '.join(described)}. They were selected as features by "
+                f"the schema's feature_patterns, so either the values need "
+                f"fixing upstream or the patterns are matching too much.")
 
     if not len(feature_columns):
         raise NoFeaturesError(

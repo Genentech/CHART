@@ -12,13 +12,15 @@ from typing import List, Union
 import pandas as pd
 from sklearn.ensemble import IsolationForest
 
+from ..io.config import GENE_LEVEL
+
 logger = logging.getLogger(__name__)
 
 #: A gene needs at least this many cells before the forest means anything.
 MIN_CELLS_PER_GENE = 2
 
 #: The index level that defines a group.
-GROUP_LEVEL = 'Gene'
+GROUP_LEVEL = GENE_LEVEL
 
 
 def detect_outliers_per_gene(data: pd.DataFrame,

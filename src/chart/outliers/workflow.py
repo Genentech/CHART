@@ -261,4 +261,5 @@ def _plot_positions(config: AllwellsConfig, outlier_cells: pd.DataFrame,
         return
 
     cell_data = load_table(config.combined_path, INPUT_NAME, OBJECTS_SUFFIX)
-    plot_outlier_positions(outlier_cells, cell_data, plot_dir)
+    plot_outlier_positions(outlier_cells, cell_data, plot_dir,
+                           centroid_columns=config.schema.centroid_columns)

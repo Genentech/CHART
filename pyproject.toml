@@ -16,11 +16,16 @@ dependencies = [
     "numba",
     "numpy",
     "pandas",
+    "pyarrow",
     "pyyaml",
     "scikit-learn",
     "scipy",
     "seaborn",
 ]
+
+# pyarrow reads and writes every table; pandas does not pull it in itself.
+# Remote paths need fsspec and the driver for the filesystem in use
+# (s3fs for S3), which are left out because most runs are local.
 
 # numba compiles the quantile normalisation kernel.  It supports a narrower
 # range of numpy versions than anything else here, so it is the dependency

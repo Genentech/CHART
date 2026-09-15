@@ -11,9 +11,12 @@ together with their defaults.
 
 import json
 import logging
+import re
 import yaml
 from dataclasses import dataclass, field, fields, replace
 from typing import Any, Dict, List, Optional, Union
+
+from .tables import list_dir
 
 logger = logging.getLogger(__name__)
 
@@ -143,13 +146,73 @@ GUIDE_SECTION = 'guide_filtering'
 _GUIDE_KEYS = frozenset({'filter_dir', 'plot_dir', 'outlier_filtered_dir',
                          'cosine_similarity_threshold', 'min_cells_per_guide'})
 
+SCHEMA_SECTION = 'schema'
+
 _TOP_LEVEL_KEYS = frozenset({'data_output_dir', 'local_output_dir',
-                             SECTION_NAME, ALLWELLS_SECTION, GUIDE_SECTION})
+                             SECTION_NAME, ALLWELLS_SECTION, GUIDE_SECTION,
+                             SCHEMA_SECTION})
 _SECTION_KEYS = frozenset({'scallops_dir', 'merged_dir', 'filter_dir', 'qc_dir',
-                           'filtered_output_dir', 'premerged', 'column_mapping',
+                           'filtered_output_dir', 'premerged',
+                           'objects_pattern', 'features_pattern',
+                           'merged_pattern',
+                           'column_mapping',
                            'column_prefix_mapping', 'exclude_patterns',
                            'drop_unassigned', 'precomputed_filters',
                            'thresholds', 'global', 'wells'})
+
+
+#: The index level names CHART uses once a table is in hand, whatever the
+#: input called its columns.  Fixed, unlike the schema below: the caller's
+#: names are mapped onto these on the way in and restored on the way out.
+LABEL_LEVEL = 'Label'
+GUIDE_LEVEL = 'Guide'
+GENE_LEVEL = 'Gene'
+WELL_LEVEL = 'Well'
+
+#: Which index levels each ``level`` keeps, before ``Well`` is appended.
+#: Note that nothing is aggregated: the rows are still one per cell.
+INDEX_LEVELS = {
+    'cell': (LABEL_LEVEL, GUIDE_LEVEL, GENE_LEVEL),
+    'guide': (GUIDE_LEVEL, GENE_LEVEL),
+    'gene': (GENE_LEVEL,),
+}
+
+
+@dataclass
+class SchemaConfig:
+    """Where each role lives in the caller's tables, and what the values mean.
+    """
+    cell_column: str = 'label'
+    guide_column: str = 'sgRNA'
+    gene_column: str = 'gene_symbol'
+
+    #: Regular expressions marking a column as a feature.  Unanchored,
+    #: so 'nuclei_' matches anywhere in the name and '^nuclei_' only at
+    #: the start.
+    feature_patterns: List[str] = field(
+        default_factory=lambda: ['cell_', 'nuclei_', 'cytosol_'])
+    #: Columns to carry alongside the features rather than measure.
+    metadata: Optional[List[str]] = None
+
+    #: Which gene values are controls: this one, or this prefix.
+    control_gene: str = 'NTC'
+    control_prefix: str = 'OR'
+
+    #: Where the outlier position plot reads cell coordinates.
+    centroid_columns: List[str] = field(
+        default_factory=lambda: ['nuclei_centroid-0', 'nuclei_centroid-1'])
+
+    def rename_map(self) -> Dict[str, str]:
+        """Map the caller's column names onto the ones the steps read.
+
+        Only the roles that differ are listed, so a default schema
+        renames nothing.
+        """
+        expected = {'cell_column': 'label', 'guide_column': 'sgRNA',
+                    'gene_column': 'gene_symbol'}
+        return {getattr(self, field_name): name
+                for field_name, name in expected.items()
+                if getattr(self, field_name) != name}
 
 
 @dataclass
@@ -195,12 +258,22 @@ class BywellConfig:
     qc_dir: str = 'preprocessing/bywell/qc_reports/'
     filtered_output_dir: str = 'preprocessing/bywell/filtered/'
     premerged: bool = False
+
+    # Input filenames, when the caller's are not {well}-objects.parquet and
+    # {well}-features.parquet.  '{well}' is substituted; the extension
+    # decides the reader.
+    objects_pattern: Optional[str] = None
+    features_pattern: Optional[str] = None
+    #: Used instead of the two above when ``premerged`` is set, as there
+    #: is then one file holding both.
+    merged_pattern: Optional[str] = None
     column_mapping: Optional[Dict[str, str]] = None
     column_prefix_mapping: Optional[Dict[str, str]] = None
     exclude_patterns: Optional[List[str]] = None
     drop_unassigned: bool = False
     precomputed_filters: Optional[Dict[str, Any]] = None
     thresholds: Thresholds = field(default_factory=Thresholds)
+    schema: SchemaConfig = field(default_factory=SchemaConfig)
     wells: Dict[str, WellConfig] = field(default_factory=dict)
     defaults: WellConfig = field(default_factory=WellConfig)
 
@@ -230,13 +303,47 @@ class BywellConfig:
         return replace(self.defaults, well=name)
 
     def well_names(self) -> List[str]:
-        """Every well named in the configuration."""
-        if not self.wells:
+        """Every well to process.
+
+        The ``wells`` section names them when it is present.  It carries
+        image directories, which only the QC step reads, so a run that
+        stops at normalisation need not list anything; the wells are then
+        read off the input filenames instead.
+        """
+        if self.wells:
+            return list(self.wells)
+        return self.discover_wells()
+
+    def discover_wells(self) -> List[str]:
+        """Which wells the input directory holds tables for.
+
+        Raises:
+            ValueError: If nothing matches, since a run over no wells
+                would otherwise report success having done nothing.
+        """
+        pattern = ((self.merged_pattern or '{well}.parquet') if self.premerged
+                   else (self.objects_pattern or '{well}-objects.parquet'))
+        head, marker, tail = pattern.partition('{well}')
+        if not marker:
             raise ValueError(
-                f"Configuration must contain a 'wells' section under "
-                f"'{SECTION_NAME}' to process all wells"
-            )
-        return list(self.wells)
+                f"Cannot tell which wells '{pattern}' covers, as it holds no "
+                f"'{{well}}' placeholder; name the wells under "
+                f"'{SECTION_NAME}' instead")
+
+        matcher = re.compile(re.escape(head) + '(.+)' + re.escape(tail) + '$')
+        found = sorted({match.group(1)
+                        for match in (matcher.match(entry)
+                                      for entry in list_dir(self.merged_path))
+                        if match})
+        if not found:
+            raise ValueError(
+                f"No input tables matching '{pattern}' in {self.merged_path}, "
+                f"so there are no wells to process. Check the path and the "
+                f"filename pattern, or name the wells under '{SECTION_NAME}'")
+
+        logger.info(f"Found {len(found)} wells in {self.merged_path}: "
+                    f"{', '.join(found)}")
+        return found
 
 
 @dataclass
@@ -262,6 +369,8 @@ class AllwellsConfig:
     # removes anything; see OPEN_ISSUES.md.
     missing_value_threshold: int = 100000
     rcv_threshold: float = 0.01
+
+    schema: SchemaConfig = field(default_factory=SchemaConfig)
 
     # Bulk data goes to data_output_dir; plots and filter lists stay local,
     # as in the by-well half.
@@ -302,6 +411,8 @@ class GuideConfig:
     cosine_similarity_threshold: float = 0.2
     min_cells_per_guide: int = 50
 
+    schema: SchemaConfig = field(default_factory=SchemaConfig)
+
     @property
     def guide_filtered_path(self) -> str:
         """Where the guide-filtered tables go, named for what it holds."""
@@ -330,6 +441,7 @@ class PreprocessingConfig:
 
 _THRESHOLD_KEYS = frozenset(f.name for f in fields(Thresholds))
 _WELL_KEYS = frozenset(f.name for f in fields(WellConfig)) - {'well'}
+_SCHEMA_KEYS = frozenset(f.name for f in fields(SchemaConfig))
 
 
 def _warn_unknown(values: Dict[str, Any], known, other_stage, where: str) -> None:
@@ -361,6 +473,16 @@ def _build_thresholds(section: Dict[str, Any], config: Dict[str, Any]) -> Thresh
                 values[key] = _as_float(source[key], key, where)
                 break
     return Thresholds(**values)
+
+
+def _build_schema(config: Dict[str, Any]) -> SchemaConfig:
+    """Read the schema, which is shared by every step and so sits at the top."""
+    block = config.get(SCHEMA_SECTION) or {}
+    if not isinstance(block, dict):
+        raise ValueError(f"'{SCHEMA_SECTION}' is present but holds no settings; "
+                         f"remove it or fill it in")
+    _warn_unknown(block, _SCHEMA_KEYS, frozenset(), SCHEMA_SECTION)
+    return SchemaConfig(**{k: v for k, v in block.items() if k in _SCHEMA_KEYS})
 
 
 def load_bywell_config(source: Union[str, Dict[str, Any], BywellConfig]) -> BywellConfig:
@@ -426,6 +548,7 @@ def load_bywell_config(source: Union[str, Dict[str, Any], BywellConfig]) -> Bywe
     return BywellConfig(data_output_dir=config['data_output_dir'],
                     local_output_dir=config['local_output_dir'],
                     thresholds=_build_thresholds(section, config),
+                    schema=_build_schema(config),
                     wells=wells,
                     defaults=defaults,
                     **known_section)
@@ -458,6 +581,7 @@ def load_allwells_config(source: Union[str, Dict[str, Any], AllwellsConfig]) -> 
 
     return AllwellsConfig(data_output_dir=config.get('data_output_dir', ''),
                           local_output_dir=config.get('local_output_dir', ''),
+                          schema=_build_schema(config),
                           **{k: v for k, v in section.items() if k in _ALLWELLS_KEYS})
 
 
@@ -485,6 +609,7 @@ def load_guide_config(source: Union[str, Dict[str, Any], GuideConfig]) -> GuideC
 
     return GuideConfig(data_output_dir=config.get('data_output_dir', ''),
                        local_output_dir=config.get('local_output_dir', ''),
+                       schema=_build_schema(config),
                        **{k: v for k, v in section.items() if k in _GUIDE_KEYS})
 
 

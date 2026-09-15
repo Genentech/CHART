@@ -140,7 +140,10 @@ def process_well(config: Union[Dict[str, Any], BywellConfig],
 
     objects = load_objects(paths['objects_dir'], well,
                            premerged=config.premerged,
-                           column_mapping=config.column_mapping)
+                           column_mapping={**(config.column_mapping or {}),
+                                           **config.schema.rename_map()},
+                           pattern=(config.merged_pattern if config.premerged
+                                    else config.objects_pattern))
 
     sgRNA_count = sum(objects['sgRNA'].notna())
     logger.info(f"Objects with sgRNA assignment: {sgRNA_count}")
@@ -293,7 +296,8 @@ def run_qc(config: Union[Dict[str, Any], BywellConfig],
     logger.info(f"Processing {len(wells)} wells for QC analysis: {list(wells)}")
     logger.info(f"Running components: {components}")
     if config.premerged:
-        logger.info("Using pre-merged input files ({well}.parquet)")
+        logger.info("Using pre-merged input files ("
+                    + (config.merged_pattern or '{well}.parquet') + ")")
     if config.column_mapping:
         logger.info(f"Column mapping active ({len(config.column_mapping)} entries)")
 

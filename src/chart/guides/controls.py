@@ -8,7 +8,7 @@ the centre of the space.
 import logging
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Dict, List, Sequence
+from typing import Dict, List, Optional, Sequence
 
 import pandas as pd
 from sklearn.covariance import EllipticEnvelope
@@ -16,6 +16,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.neighbors import LocalOutlierFactor
 
 from ..dimred import control_mask
+from ..io.config import GUIDE_LEVEL, SchemaConfig
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ METHODS = (ISOLATION_FOREST, LOCAL_OUTLIER_FACTOR, ELLIPTIC_ENVELOPE)
 MIN_METHODS = 2
 
 #: The index level naming a guide.
-GUIDE_LEVEL = 'Guide'
+
 
 #: Defaults carried over from cellmapp, which has no config key for them.
 N_ESTIMATORS = 100
@@ -59,7 +60,8 @@ class ControlResult:
         return [method for method in METHODS if method not in self.failed]
 
 
-def subset_controls(data: pd.DataFrame) -> pd.DataFrame:
+def subset_controls(data: pd.DataFrame,
+                    schema: Optional[SchemaConfig] = None) -> pd.DataFrame:
     """Keep only the control guides.
 
     Args:
@@ -71,18 +73,22 @@ def subset_controls(data: pd.DataFrame) -> pd.DataFrame:
     Raises:
         NoControlGuidesError: if no row is a control
     """
-    from ..dimred import CONTROL_GENE, CONTROL_PREFIX, GENE_LEVEL
+    from ..dimred import GENE_LEVEL
+
+    schema = schema or SchemaConfig()
 
     if GENE_LEVEL not in (data.index.names or ()):
         raise KeyError(f"Cannot select controls: the table has no "
                        f"'{GENE_LEVEL}' index level, only "
                        f"{', '.join(str(n) for n in data.index.names or ())}")
 
-    controls = data[control_mask(data.index.get_level_values(GENE_LEVEL))]
+    controls = data[control_mask(data.index.get_level_values(GENE_LEVEL),
+                                 schema)]
     if not len(controls):
         raise NoControlGuidesError(
             f"No control guides among {len(data)} rows: none target "
-            f"{CONTROL_GENE} or a gene starting with {CONTROL_PREFIX}. "
+            f"{schema.control_gene} or a gene starting with "
+            f"{schema.control_prefix}. "
             f"Without controls there is no reference to filter against.")
 
     logger.info(f"{len(controls)} control guides of {len(data)}")

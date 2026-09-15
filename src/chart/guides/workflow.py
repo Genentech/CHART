@@ -15,7 +15,7 @@ from .. import __version__
 from ..combining.aggregate import aggregate
 from ..dimred import (GENE_LEVEL, center_on_controls, cosine_similarity_matrix,
                       generate_pca_space)
-from ..io.config import AllwellsConfig, GuideConfig
+from ..io.config import AllwellsConfig, GuideConfig, SchemaConfig
 from ..io.tables import load_table, save_table
 from .controls import (GUIDE_LEVEL, MIN_METHODS, ControlResult,
                        find_outlier_controls, subset_controls,
@@ -194,14 +194,15 @@ def run_guide_filtering(allwells: AllwellsConfig,
 
     control_result, control_guides = _run_controls(
         guide_data, min_methods=min_methods, save_plots=save_plots,
-        plot_dir=plot_dir)
+        plot_dir=plot_dir, schema=guides.schema)
     result.controls = control_result.controls
     result.control_outliers = len(control_guides)
 
     kept = guide_data[~guide_data.index.get_level_values(GUIDE_LEVEL)
                       .isin(control_guides)]
     similarity, perturbation_guides = _run_perturbations(
-        kept, threshold=threshold, save_plots=save_plots, plot_dir=plot_dir)
+        kept, threshold=threshold, save_plots=save_plots, plot_dir=plot_dir,
+        schema=guides.schema)
     result.guides_scored = len(similarity.scores)
     result.perturbation_outliers = len(perturbation_guides)
 
@@ -213,9 +214,10 @@ def run_guide_filtering(allwells: AllwellsConfig,
 
 
 def _run_controls(guide_data: pd.DataFrame, min_methods: int,
-                  save_plots: bool, plot_dir: str):
+                  save_plots: bool, plot_dir: str,
+                  schema: Optional[SchemaConfig] = None):
     """Phase one: the control guides that do not behave like controls."""
-    controls = subset_controls(guide_data)
+    controls = subset_controls(guide_data, schema)
 
     # The space is built from every guide, so the controls are placed
     # against the full spread rather than only against each other.
@@ -241,13 +243,14 @@ def _run_controls(guide_data: pd.DataFrame, min_methods: int,
 
 
 def _run_perturbations(kept: pd.DataFrame, threshold: float,
-                       save_plots: bool, plot_dir: str):
+                       save_plots: bool, plot_dir: str,
+                       schema: Optional[SchemaConfig] = None):
     """Phase two: the guides that disagree with their own gene."""
     # A second space, because the first was built with the outlier
     # controls still in it and they move the centroid everything is
     # measured from.
-    centered = center_on_controls(generate_pca_space(kept))
-    similarity = guide_similarities(cosine_similarity_matrix(centered))
+    centered = center_on_controls(generate_pca_space(kept), schema)
+    similarity = guide_similarities(cosine_similarity_matrix(centered), schema)
 
     if save_plots:
         plot_similarity_comparison(similarity.scores, threshold, plot_dir)

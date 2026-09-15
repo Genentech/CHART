@@ -1,0 +1,105 @@
+# Example CHART configuration.  Copy this and edit the paths.
+#
+#   chart --config my_screen.yaml --all-wells
+#
+# Every key below except the two output directories is optional, and the
+# values shown are the defaults.  A file holding only those two runs the
+# reference dataset: the wells are read off the input filenames, and the
+# schema defaults are the names that dataset uses.
+#
+# Input and output tables are parquet.  Either directory may be a URL
+# such as s3://bucket/prefix, which needs fsspec and s3fs installed.
+
+# Bulk tables go here; reports, plots and filter lists stay local.
+data_output_dir: /path/to/bulk/outputs
+local_output_dir: /path/to/reports
+
+
+# Where each role lives in your tables, and what the values mean.  Tables
+# are not expected to use CHART's own column names.
+schema:
+  cell_column: label              # per-object identifier within a well
+  guide_column: sgRNA             # guide identifier
+  gene_column: gene_symbol        # gene the guide targets
+
+  # A column is a feature when one of these matches its name.  These are
+  # unanchored regular expressions, so 'nuclei_' matches anywhere in the
+  # name and '^nuclei_' only at the start.  For CellProfiler output,
+  # ['^Nuclei_', '^Cells_', '^Cytoplasm_'] is the usual choice.
+  #
+  # Every column that matches has to hold numbers.  One that does not
+  # stops the run rather than being dropped quietly, so narrow these
+  # patterns if the table carries text alongside the measurements.
+  feature_patterns: [cell_, nuclei_, cytosol_]
+
+  # Which gene values are controls: this name, or this prefix.  Set
+  # control_prefix to null for screens with no prefix convention.
+  control_gene: NTC
+  control_prefix: OR
+
+  # Where the outlier position plot reads cell coordinates, y then x.
+  centroid_columns: [nuclei_centroid-0, nuclei_centroid-1]
+
+  # The well is deliberately absent: it comes from the well being
+  # processed, not from a column.  See objects_pattern below.
+
+
+preprocessing_bywell:
+  # Whether to drop cells whose guide or gene is unassigned.  Keeping
+  # them lets the QC reports show how many there were.
+  drop_unassigned: false
+
+  # Input filenames.  '{well}' is substituted with the well being
+  # processed.  Leave these out for '{well}-objects.parquet' and
+  # '{well}-features.parquet'.
+  # objects_pattern: 'plate1_{well}.objects.parquet'
+  # features_pattern: 'plate1_{well}.features.parquet'
+
+  # Set premerged when one file per well holds objects and features
+  # together.  merged_pattern then names it, and the two keys above are
+  # unused.  Without a pattern it looks for '{well}.parquet'.
+  # premerged: true
+  # merged_pattern: 'plate1_{well}.all.parquet'
+
+  # Feature columns to drop after feature_patterns has selected them.
+  # Unanchored regular expressions again, but matched case-insensitively,
+  # since they pick out position and orientation columns whatever the
+  # screen calls them.  Leave this out for the defaults: bbox, centroid,
+  # location, centermass, to_origin, _x, _y and orientation.
+  # exclude_patterns: [_Location_, _Number_Object_Number]
+
+  # Image directories, which only the QC step reads.  Leave this out and
+  # the wells come from the input filenames instead, which is all the
+  # steps up to normalisation need.  'global' supplies the defaults for
+  # every well, and a well may override any of them.
+  # global:
+  #   sbs_dir: /path/to/sbs
+  #   sbs_feature_dir: /path/to/sbs/features
+  #   dapi_channel_names: [DAPI, GFP, DAPI]
+  # wells:
+  #   A1:
+  #     pheno_dir: /path/to/pheno/A1
+  #     pheno_sbs_registered_dir: /path/to/registered/A1
+  #   A2:
+  #     pheno_dir: /path/to/pheno/A2
+  #     pheno_sbs_registered_dir: /path/to/registered/A2
+
+
+preprocessing_allwells:
+  normalization_type: quantile
+
+  # Outlier detection.  'auto' lets the forest choose how many cells to
+  # flag; a float fixes the proportion.
+  contamination: auto
+  random_state: 42
+  n_estimators: 100
+
+  # Prefilters applied before detection.  The missing-value threshold is
+  # a count, not a fraction.
+  missing_value_threshold: 100000
+  rcv_threshold: 0.01
+
+
+guide_filtering:
+  cosine_similarity_threshold: 0.2
+  min_cells_per_guide: 50

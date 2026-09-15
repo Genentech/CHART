@@ -87,7 +87,10 @@ def process_well(config: Union[Dict[str, Any], BywellConfig],
     objects = features = None
 
     if _enabled(targets, 'objects'):
-        objects = arrange_index(load_table(config.merged_path, well, '-objects'))
+        objects = arrange_index(rename_columns(
+            load_table(config.merged_path, well, '-objects',
+                       config.objects_pattern),
+            config.schema.rename_map()))
         if config.drop_unassigned:
             objects = drop_unassigned(objects)
         result.objects_total = len(objects)
@@ -96,11 +99,16 @@ def process_well(config: Union[Dict[str, Any], BywellConfig],
         save_table(objects, config.filtered_path, well, '-objects')
 
     if _enabled(targets, 'features'):
-        features = arrange_index(load_table(config.merged_path, well, '-features'))
+        features = arrange_index(rename_columns(
+            load_table(config.merged_path, well, '-features',
+                       config.features_pattern),
+            config.schema.rename_map()))
         if config.drop_unassigned:
             features = drop_unassigned(features)
         result.features_total = len(features)
-        features = filter_features(features, exclude_patterns=config.exclude_patterns)
+        features = filter_features(features,
+                                   keep_patterns=config.schema.feature_patterns,
+                                   exclude_patterns=config.exclude_patterns)
         features = apply_filters(features, inclusion, exclusion)
         result.features_kept = len(features)
         save_table(features, config.filtered_path, well, '-features')
@@ -109,7 +117,9 @@ def process_well(config: Union[Dict[str, Any], BywellConfig],
     # from the frames already in memory rather than by re-reading them.
     if objects is not None and features is not None:
         merged = merge_objects_features(objects, features)
-        merged = filter_features(merged, exclude_patterns=config.exclude_patterns)
+        merged = filter_features(merged,
+                                 keep_patterns=config.schema.feature_patterns,
+                                 exclude_patterns=config.exclude_patterns)
         save_table(merged, config.filtered_path, well)
         result.merged_written = True
 
@@ -122,9 +132,14 @@ def _process_premerged(config: BywellConfig,
                        result: WellFilterResult,
                        inclusion: Sequence[Any],
                        exclusion: Sequence[Any]) -> WellFilterResult:
-    """Filter a single input file that already holds objects and features."""
-    data = load_table(config.merged_path, well)
-    data = rename_columns(data, config.column_mapping, config.column_prefix_mapping)
+    """Filter a single input file that already holds objects and features.
+
+    There is one file rather than two, so ``merged_pattern`` names it.
+    """
+    data = load_table(config.merged_path, well, '', config.merged_pattern)
+    data = rename_columns(data, {**(config.column_mapping or {}),
+                                 **config.schema.rename_map()},
+                          config.column_prefix_mapping)
 
     if 'label' not in data.columns:
         data['label'] = data.index
@@ -178,7 +193,8 @@ def run_filtering(config: Union[Dict[str, Any], BywellConfig],
 
     logger.info(f"Filtering {len(wells)} wells: {list(wells)}")
     if config.premerged:
-        logger.info("Using pre-merged input files ({well}.parquet)")
+        logger.info("Using pre-merged input files ("
+                    + (config.merged_pattern or '{well}.parquet') + ")")
 
     results = []
     for well in wells:

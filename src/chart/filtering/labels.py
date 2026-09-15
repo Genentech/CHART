@@ -9,9 +9,11 @@ from typing import List, Sequence
 import numpy as np
 import pandas as pd
 
+from ..io.config import INDEX_LEVELS
+
 logger = logging.getLogger(__name__)
 
-INDEX_NAMES = ('Label', 'Guide', 'Gene')
+INDEX_NAMES = INDEX_LEVELS['cell']
 
 
 def arrange_index(df: pd.DataFrame) -> pd.DataFrame:
