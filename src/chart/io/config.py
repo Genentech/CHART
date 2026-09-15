@@ -191,7 +191,10 @@ class SchemaConfig:
     #: the start.
     feature_patterns: List[str] = field(
         default_factory=lambda: ['cell_', 'nuclei_', 'cytosol_'])
-    #: Columns to carry alongside the features rather than measure.
+    #: Columns to carry alongside the features rather than measure.  Not
+    #: read yet: metadata reaches the objects tables and is dropped from
+    #: the feature tables, which OPEN_ISSUES.md explains along with why
+    #: implementing it waits for the move to AnnData.
     metadata: Optional[List[str]] = None
 
     #: Which gene values are controls: this one, or this prefix.
