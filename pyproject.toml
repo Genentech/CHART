@@ -35,6 +35,9 @@ dependencies = [
 # on PyPI, so it has to be installed separately; without it CHART skips the
 # components that need image data rather than failing.
 
+[project.optional-dependencies]
+dev = ["pytest"]
+
 [project.scripts]
 chart = "chart.cli:main"
 

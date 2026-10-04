@@ -8,6 +8,8 @@ from typing import List, Optional, Sequence
 
 import pandas as pd
 
+from .labels import NoCellsError
+
 logger = logging.getLogger(__name__)
 
 #: Patterns worth keeping: the three segmentation compartments.
@@ -131,6 +133,17 @@ def merge_objects_features(objects: pd.DataFrame,
     """
     extra = [col for col in features.columns if col not in objects.columns]
     merged = objects.join(features[extra], how='inner')
+
+    if len(merged) < len(objects):
+        lost = (f"{len(objects) - len(merged)} of the {len(objects)} objects "
+                f"have no matching row in the feature table")
+        if not len(merged):
+            raise NoCellsError(
+                f"{lost}, so the merge is empty. The two tables describe "
+                f"different objects: check they come from the same well and "
+                f"that the label column has the same type in both.")
+        logger.warning(f"{lost} and have been dropped")
+
     logger.info(f"Merged objects and features: {len(merged)} objects, "
                 f"{len(merged.columns)} columns "
                 f"({len(extra)} contributed by the feature table)")

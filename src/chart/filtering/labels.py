@@ -16,6 +16,15 @@ logger = logging.getLogger(__name__)
 INDEX_NAMES = INDEX_LEVELS['cell']
 
 
+class NoCellsError(ValueError):
+    """A table that should describe cells describes none.
+
+    Raised rather than passing the empty table on, because every later
+    step treats one as a well with nothing in it and still reports
+    success.
+    """
+
+
 def arrange_index(df: pd.DataFrame) -> pd.DataFrame:
     """Move label, guide and gene identity from columns into the index.
 
@@ -26,6 +35,12 @@ def arrange_index(df: pd.DataFrame) -> pd.DataFrame:
     if missing:
         raise KeyError(f"Cannot build the {'/'.join(INDEX_NAMES)} index: "
                        f"missing column(s) {', '.join(missing)}")
+
+    if not len(df):
+        raise NoCellsError(
+            f"The table has its {len(df.columns)} columns but no rows at "
+            f"all, so there are no cells to work with. Check that the file "
+            f"it came from was written completely.")
 
     df = df.copy()
     df.insert(0, "Label", df['label'])
@@ -71,6 +86,16 @@ def apply_filters(data: pd.DataFrame,
     filtered = data[data.index.get_level_values('Label').isin(labels)]
     logger.info(f"Filtered data: {len(filtered)} objects remaining, from {len(data)}")
     if len(filtered) == 0 and len(data) > 0:
-        logger.warning("Every object was filtered out; check that the filter "
-                       "labels refer to the same objects as this table")
+        held = data.index.get_level_values('Label')
+        offered = [label for series in
+                   list(inclusion_filters) + list(exclusion_filters)
+                   for label in list(series)[:3]]
+        raise NoCellsError(
+            f"Every one of the {len(data)} objects was filtered out, "
+            f"leaving nothing to analyse. The table holds {held.dtype} "
+            f"labels such as {list(held[:3])}; the filter lists hold "
+            f"{', '.join(repr(label) for label in offered[:3]) or 'none'}. "
+            f"The two have to identify objects the same way, so a label "
+            f"type that differs between them, or filter lists belonging to "
+            f"another well, empties the table like this.")
     return filtered
