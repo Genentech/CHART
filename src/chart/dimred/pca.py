@@ -10,6 +10,8 @@ import pandas as pd
 from sklearn.decomposition import IncrementalPCA
 from sklearn.preprocessing import StandardScaler
 
+from ..io.config import GENE_LEVEL, SchemaConfig
+
 logger = logging.getLogger(__name__)
 
 #: Percentage of the variance the retained components should cover.
@@ -22,12 +24,12 @@ DEFAULT_BATCH_SIZE = 2000
 MIN_SAMPLES = 2
 
 #: The index level naming the gene a guide targets.
-GENE_LEVEL = 'Gene'
+
 
 #: Genes that carry no perturbation: the non-targeting controls, and the
 #: olfactory receptors, which are not expressed in these cells.
-CONTROL_GENE = 'NTC'
-CONTROL_PREFIX = 'OR'
+CONTROL_GENE = SchemaConfig().control_gene
+CONTROL_PREFIX = SchemaConfig().control_prefix
 
 
 class NoComponentsError(ValueError):
@@ -93,7 +95,8 @@ def generate_pca_space(data: pd.DataFrame,
                         columns=[f'PC{i + 1}' for i in range(n_components)])
 
 
-def control_mask(genes: Union[pd.Index, pd.Series]) -> np.ndarray:
+def control_mask(genes: Union[pd.Index, pd.Series],
+                 schema: Optional[SchemaConfig] = None) -> np.ndarray:
     """Which entries of *genes* name a control.
 
     Args:
@@ -103,12 +106,17 @@ def control_mask(genes: Union[pd.Index, pd.Series]) -> np.ndarray:
         A boolean array, true where the gene is :data:`CONTROL_GENE` or
         starts with :data:`CONTROL_PREFIX`.
     """
+    schema = schema or SchemaConfig()
     values = pd.Index(genes).astype(str)
-    return np.asarray((values == CONTROL_GENE)
-                      | values.str.startswith(CONTROL_PREFIX, na=False))
+    named = values == schema.control_gene
+    if not schema.control_prefix:
+        return np.asarray(named)
+    return np.asarray(named
+                      | values.str.startswith(schema.control_prefix, na=False))
 
 
-def center_on_controls(pca_data: pd.DataFrame) -> pd.DataFrame:
+def center_on_controls(pca_data: pd.DataFrame,
+                       schema: Optional[SchemaConfig] = None) -> pd.DataFrame:
     """Shift the PCA space so the control centroid sits at the origin.
 
     Args:
@@ -127,13 +135,14 @@ def center_on_controls(pca_data: pd.DataFrame) -> pd.DataFrame:
                        f"{', '.join(str(n) for n in pca_data.index.names or ())}")
 
     genes = pca_data.index.get_level_values(GENE_LEVEL)
-    controls = control_mask(genes)
+    schema = schema or SchemaConfig()
+    controls = control_mask(genes, schema)
 
     if not controls.any():
         raise NoControlsError(
             f"Cannot centre on controls: none of the {len(pca_data)} rows "
-            f"target {CONTROL_GENE} or a gene starting with "
-            f"{CONTROL_PREFIX}. Genes seen: "
+            f"target {schema.control_gene} or a gene starting with "
+            f"{schema.control_prefix}. Genes seen: "
             f"{', '.join(str(g) for g in pd.unique(genes)[:5]) or 'none'}"
             + (', and more' if pca_data.index.get_level_values(
                 GENE_LEVEL).nunique() > 5 else '') + ".")

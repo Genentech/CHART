@@ -10,15 +10,10 @@ from typing import Dict
 
 import pandas as pd
 
+from ..io.config import INDEX_LEVELS
+
 logger = logging.getLogger(__name__)
 
-#: Which index levels each ``level`` keeps, before ``Well`` is appended.
-#: Note that nothing is aggregated: the rows are still one per cell.
-INDEX_LEVELS = {
-    'cell': ('Label', 'Guide', 'Gene'),
-    'guide': ('Guide', 'Gene'),
-    'gene': ('Gene',),
-}
 LEVELS = tuple(INDEX_LEVELS)
 
 
