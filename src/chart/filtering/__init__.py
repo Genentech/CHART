@@ -8,7 +8,7 @@ from .features import (
     merge_objects_features
 )
 from .io import load_filter_lists
-from .labels import apply_filters, arrange_index
+from .labels import NoCellsError, apply_filters, arrange_index
 from .workflow import (
     TARGETS,
     MissingFiltersError,
@@ -26,6 +26,7 @@ __all__ = [
     'load_filter_lists',
     'apply_filters',
     'arrange_index',
+    'NoCellsError',
     'filter_features',
     'NoFeaturesError',
     'merge_objects_features'

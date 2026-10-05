@@ -13,6 +13,7 @@ from typing import Optional
 import pandas as pd
 
 from ..io.filters import EXCLUSION, INCLUSION, FilterEntry
+from ..io.tables import load_table
 
 logger = logging.getLogger(__name__)
 
@@ -59,23 +60,23 @@ def load_sbs_dapi_image(sbs_dir, well):
     return sbs
 
 
-def load_objects(objects_dir, well, premerged=False, column_mapping=None):
+def load_objects(objects_dir, well, premerged=False, column_mapping=None,
+                 pattern=None):
     """Load object data for a specific well.
     
     Args:
         objects_dir: Directory containing object/merged files
         well: Well identifier
-        premerged: If True, read {well}.parquet (upstream pipeline already merged
-                   objects + features + reads). If False, read {well}-objects.parquet.
+        premerged: If True, read {well} (upstream pipeline already merged
+                   objects + features + reads). If False, read {well}-objects.
         column_mapping: Optional dict mapping source column names to cellmapp
                         standard names (e.g. ``{"barcode_0": "sgRNA"}``).
                         Applied after loading so downstream code can use a
                         consistent vocabulary.  When ``None`` no renaming is done.
     """
     suffix = "" if premerged else "-objects"
-    path = os.path.join(objects_dir, f"{well}{suffix}.parquet")
-    logger.info(f"Reading object matrix from {path}")
-    objects = pd.read_parquet(path)
+    logger.info(f"Reading object matrix for well {well} from {objects_dir}")
+    objects = load_table(objects_dir, well, suffix, pattern)
 
     if column_mapping:
         present = {k: v for k, v in column_mapping.items() if k in objects.columns}

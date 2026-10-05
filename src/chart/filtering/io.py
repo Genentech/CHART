@@ -57,14 +57,45 @@ def load_filter_lists(filter_dir: str,
     return inclusion, exclusion
 
 
+def _reject_collisions(columns: pd.Index, renames: Dict[str, str]) -> None:
+    """Refuse a rename that would give two columns the same name.
+
+    A table may well hold a column already called ``label`` that means
+    something other than the cell identifier.  Renaming onto it would
+    leave the steps reading whichever of the two came first, so the
+    clash has to be settled outside CHART.
+    """
+    produced: Dict[str, List[str]] = {}
+    for source in columns:
+        produced.setdefault(renames.get(source, source), []).append(source)
+
+    # Duplicates the table already had are left alone; only a name this
+    # rename is about to create counts.
+    clashes = {name: sources for name, sources in produced.items()
+               if len(sources) > 1 and any(s in renames for s in sources)}
+    if clashes:
+        detail = '; '.join(
+            f"'{name}' from " + ' and '.join(f"'{source}'" for source in sources)
+            for name, sources in clashes.items())
+        raise ValueError(
+            f"Renaming would give two columns the same name: {detail}. "
+            f"Rename or drop the column standing in the way before CHART "
+            f"reads the table.")
+
+
 def rename_columns(data: pd.DataFrame,
                    column_mapping: Optional[Dict[str, str]] = None,
                    column_prefix_mapping: Optional[Dict[str, str]] = None) -> pd.DataFrame:
     """Bring column names into CHART's vocabulary.
+
+    Raises:
+        ValueError: If a rename would collide with a column already
+            present under that name.
     """
     if column_mapping:
         present = {k: v for k, v in column_mapping.items() if k in data.columns}
         if present:
+            _reject_collisions(data.columns, present)
             data = data.rename(columns=present)
             logger.info(f"Renamed {len(present)} columns via column_mapping")
 
@@ -76,6 +107,7 @@ def rename_columns(data: pd.DataFrame,
                     renames[col] = new_prefix + col[len(old_prefix):].lower()
                     break
         if renames:
+            _reject_collisions(data.columns, renames)
             data = data.rename(columns=renames)
             logger.info(f"Prefix-renamed {len(renames)} columns")
 
