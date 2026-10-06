@@ -281,8 +281,20 @@ evaluate_partitions_with_AA <- function(qc_tbl, scores_full, supercell_files, aa
 # -------------------------
 # Main execution
 # -------------------------
-sc_dir <- file.path("/gstore/data/marioni_group/Carolina/CP2.0/ArchetypeAnalysis/tmp_archetype_outputs", channel)
+# Every step of this stage reads and writes inside one directory per
+# channel.  'chart archetypes' sets it; by hand, export it once.
+sc_dir <- Sys.getenv("CHART_ARCHETYPE_DIR")
+if (sc_dir == "") {
+  stop("Set CHART_ARCHETYPE_DIR to this channel's directory, or run this ",
+       "through 'chart archetypes'")
+}
 aa_dir <- sc_dir
+
+# This script's only output is a table for a person to compare partitions
+# with, so it goes to the reports root when there is one.
+report_dir <- Sys.getenv("CHART_ARCHETYPE_REPORT_DIR")
+if (report_dir == "") report_dir <- sc_dir
+dir.create(report_dir, recursive = TRUE, showWarnings = FALSE)
 
 # Check if directory exists
 if (!dir.exists(sc_dir)) {
@@ -322,9 +334,9 @@ qc_tbl <- evaluate_partitions(scores_full, supercell_files, Pfull = ncol(scores_
 
 # Save QC results
 out_file <- if (use_pw) {
-  file.path(sc_dir, "space_evals_pw.csv")
+  file.path(report_dir, "space_evals_pw.csv")
 } else {
-  file.path(sc_dir, "space_evals.csv")
+  file.path(report_dir, "space_evals.csv")
 }
 
 write.csv(qc_tbl, out_file, row.names = FALSE)

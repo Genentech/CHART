@@ -16,10 +16,22 @@ script_dir <- dirname(sub("^--file=", "",
                           grep("^--file=", commandArgs(FALSE), value = TRUE)[1]))
 source(file.path(script_dir, "pick_npc.R"))
 
-outdir = paste0("tmp_archetype_outputs/",channel)
-indir = paste0("/gstore/data/marioni_group/Carolina/CP2.0/ArchetypeAnalysis/tmp_archetype_outputs/",channel)
+# Every step of this stage reads and writes inside one directory per
+# channel.  'chart archetypes' sets it; by hand, export it once.
+indir = Sys.getenv("CHART_ARCHETYPE_DIR")
+if (indir == "") {
+  stop("Set CHART_ARCHETYPE_DIR to the directory holding this channel's ",
+       "cell_pca_centered.parquet, or run this through 'chart archetypes'")
+}
+outdir = indir
+
+# Plots and tables nothing downstream reads go to the reports root when
+# 'chart archetypes' names one, and beside the data otherwise.
+reportdir = Sys.getenv("CHART_ARCHETYPE_REPORT_DIR")
+if (reportdir == "") reportdir = outdir
 
 dir.create(outdir, recursive = TRUE)
+dir.create(reportdir, recursive = TRUE, showWarnings = FALSE)
 
 # Load existing env
 # if (!requireNamespace("renv", quietly = TRUE)) install.packages("renv")
@@ -41,7 +53,7 @@ if (is.na(n.pc)) {
 
   # Save diagnostic plot
   plot_npc_elbow(sel,
-                 paste0(outdir,"/npc_elbow_gamma",gamma,"_knn",k.knn,".pdf"),
+                 paste0(reportdir,"/npc_elbow_gamma",gamma,"_knn",k.knn,".pdf"),
                  paste0(channel, ": Selected n.pc = ", n.pc))
 } else {
   message(paste0("Using the n.pc given on the command line: ", n.pc,

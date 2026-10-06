@@ -221,7 +221,19 @@ knn = as.numeric(args[[2]])
 channel = args[[3]]
 pw = as.logical(args[[4]])
 
-indir = "/gstore/data/marioni_group/Carolina/CP2.0/ArchetypeAnalysis/tmp_archetype_outputs/"
+# Every step of this stage reads and writes inside one directory per
+# channel.  'chart archetypes' sets it; by hand, export it once.  This
+# script joins indir and channel itself, so it wants the parent.
+chan_dir = Sys.getenv("CHART_ARCHETYPE_DIR")
+if (chan_dir == "") {
+  stop("Set CHART_ARCHETYPE_DIR to this channel's directory, or run this ",
+       "through 'chart archetypes'")
+}
+if (basename(chan_dir) != channel) {
+  stop("CHART_ARCHETYPE_DIR ends in '", basename(chan_dir), "' but the ",
+       "channel asked for is '", channel, "'")
+}
+indir = paste0(dirname(chan_dir), "/")
 
 # Auto-detect npc from existing supercell files
 message("Auto-detecting npc for channel ", channel, " with gamma=", gamma, ", knn=", knn)

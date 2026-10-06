@@ -2,6 +2,12 @@
 Dimensionality reduction, shared by the steps that need a reduced space.
 """
 
+from .channels import (
+    GEOMETRY_PATTERNS,
+    NoFeaturesError,
+    channel_features,
+    write_channel_pca
+)
 from .cosinesim import cosine_similarity_matrix
 from .pca import (
     CONTROL_GENE,
@@ -18,6 +24,10 @@ from .pca import (
 
 __all__ = [
     'generate_pca_space',
+    'channel_features',
+    'write_channel_pca',
+    'NoFeaturesError',
+    'GEOMETRY_PATTERNS',
     'center_on_controls',
     'control_mask',
     'cosine_similarity_matrix',

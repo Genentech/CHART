@@ -1,6 +1,21 @@
 # Choose how many PCs to keep for a channel, from the elbow of the per-PC
 # variance curve. 
 
+# Where a falling curve bends: the point furthest from the chord joining
+# its two ends.  Also used on the K recovery curves, which fall for the
+# same reason and have no minimum to aim at.
+elbow_index <- function(x, y) {
+  x1 <- x[1]; y1 <- y[1]
+  x2 <- x[length(x)]; y2 <- y[length(y)]
+
+  # |(y2-y1)x - (x2-x1)y + x2*y1 - y2*x1| / sqrt((y2-y1)^2 + (x2-x1)^2)
+  num <- abs((y2 - y1) * x - (x2 - x1) * y + x2 * y1 - y2 * x1)
+  den <- sqrt((y2 - y1)^2 + (x2 - x1)^2)
+  d <- num / (den + 1e-12)
+
+  list(at = which.max(d), score = d)
+}
+
 load_pca <- function(path) {
   pca <- read_parquet(path)
   cell_id <- paste(pca$Well, pca$Label, sep = "-")
@@ -21,21 +36,8 @@ pick_npc_by_elbow <- function(scores, npc_min = 10, npc_max = 60, use_log = TRUE
   y <- v[idx]
   if (use_log) y <- log(pmax(y, 1e-12))
 
-  # Points (x, y)
-  x <- idx
-
-  # Line through endpoints: (x1,y1) -> (x2,y2)
-  x1 <- x[1]; y1 <- y[1]
-  x2 <- x[length(x)]; y2 <- y[length(y)]
-
-  # Distance from each point to the line (in 2D)
-  # |(y2-y1)x - (x2-x1)y + x2*y1 - y2*x1| / sqrt((y2-y1)^2 + (x2-x1)^2)
-  num <- abs((y2 - y1) * x - (x2 - x1) * y + x2 * y1 - y2 * x1)
-  den <- sqrt((y2 - y1)^2 + (x2 - x1)^2)
-  d <- num / (den + 1e-12)
-
-  # Elbow = max distance to chord
-  k_elbow <- which.max(d)
+  bend <- elbow_index(idx, y)
+  k_elbow <- bend$at
 
   # Clamp
   npc <- max(npc_min, min(k_elbow, npc_max))
@@ -45,7 +47,7 @@ pick_npc_by_elbow <- function(scores, npc_min = 10, npc_max = 60, use_log = TRUE
     elbow_raw = k_elbow,
     var = v,
     idx = idx,
-    score = d
+    score = bend$score
   )
 }
 
@@ -77,7 +79,12 @@ if (sys.nframe() == 0L) {
                              use_log=TRUE)
     npc <- sel$npc
     message("Elbow selected n.pc = ", npc, " from ", pca_path)
-    plot_npc_elbow(sel, sub("\\.txt$", ".pdf", out_path),
+    # The curve is only there to be looked at, so it goes to the reports
+    # root when there is one, and beside npc.txt otherwise.
+    report_dir <- Sys.getenv("CHART_ARCHETYPE_REPORT_DIR")
+    if (report_dir == "") report_dir <- dirname(out_path)
+    dir.create(report_dir, recursive = TRUE, showWarnings = FALSE)
+    plot_npc_elbow(sel, file.path(report_dir, "npc_elbow.pdf"),
                    paste0("Selected n.pc = ", npc))
   }
 
