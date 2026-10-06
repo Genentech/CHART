@@ -24,12 +24,48 @@ conda activate chart-r
 Rscript -e 'install.packages("archetypes", repos="https://cloud.r-project.org")'
 ```
 
+## Quickstart
+
+Install the package, plus the environment above if you want the archetype
+analysis:
+
+```
+pip install .
+```
+
+Write a config saying where the input is and where output should go:
+
+```yaml
+data_output_dir: /work/screen1/bulk
+local_output_dir: /work/screen1/reports
+
+preprocessing_bywell:
+  merged_dir: /data/screen1/objects        # where the input parquet lives
+
+archetypes:
+  channels: [TOM20]                        # the channels to analyse
+  all_channels: [DAPI1, TOM20, Golgin97]   # every channel the table holds
+```
+
+Then run the two stages in order:
+
+```
+chart preprocessing --config my_screen.yaml --all-wells
+chart archetypes --config my_screen.yaml --all-channels
+```
+
+Wells are read off the input filenames. Name wells
+individually with `--well` and channels with `--channel`, and use
+`--steps` on either command to run only part of a pipeline.
+`chart archetypes --dry-run` prints every command the stage would run
+without running any of them.
+
 ## Configuration
 
 Every step reads one YAML file, given with `--config`:
 
 ```
-chart --config my_screen.yaml --all-wells
+chart preprocessing --config my_screen.yaml --all-wells
 ```
 
 Use `example_config.yaml` as a starting point: copy it and edit the paths. Every key in it except the two output directories is optional, and the values shown are the defaults.

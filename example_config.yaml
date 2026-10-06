@@ -1,6 +1,6 @@
 # Example CHART configuration.  Copy this and edit the paths.
 #
-#   chart --config my_screen.yaml --all-wells
+#   chart preprocessing --config my_screen.yaml --all-wells
 #
 # Every key below except the two output directories is optional, and the
 # values shown are the defaults.  A file holding only those two runs the
@@ -48,6 +48,11 @@ preprocessing_bywell:
   # Whether to drop cells whose guide or gene is unassigned.  Keeping
   # them lets the QC reports show how many there were.
   drop_unassigned: false
+
+  # Where the input tables are read from.  A relative path is taken
+  # under data_output_dir, so set this to an absolute path or a URL when
+  # the input lives somewhere other than beside the outputs.
+  # merged_dir: /data/screen1/objects/
 
   # Input filenames.  '{well}' is substituted with the well being
   # processed.  Leave these out for '{well}-objects.parquet' and
