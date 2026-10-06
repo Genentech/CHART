@@ -49,3 +49,11 @@ version = { attr = "chart.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# All but the pca step are R scripts, which an install has to carry for
+# 'chart archetypes' to find them.  They are data rather than modules, so
+# they are named here instead of being found.  The whole directory is
+# taken rather than a list of suffixes, so that a script added in a
+# format not thought of here still reaches an install.
+[tool.setuptools.package-data]
+"chart.archetypes" = ["scripts/**/*"]

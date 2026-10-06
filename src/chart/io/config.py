@@ -148,9 +148,15 @@ _GUIDE_KEYS = frozenset({'filter_dir', 'plot_dir', 'outlier_filtered_dir',
 
 SCHEMA_SECTION = 'schema'
 
+ARCHETYPES_SECTION = 'archetypes'
+
+_ARCHETYPES_KEYS = frozenset({'outputs_dir', 'reports_dir', 'features_dir',
+                              'features_file', 'channels', 'all_channels',
+                              'params', 'selected_params', 'npc', 'k'})
+
 _TOP_LEVEL_KEYS = frozenset({'data_output_dir', 'local_output_dir',
                              SECTION_NAME, ALLWELLS_SECTION, GUIDE_SECTION,
-                             SCHEMA_SECTION})
+                             SCHEMA_SECTION, ARCHETYPES_SECTION})
 _SECTION_KEYS = frozenset({'scallops_dir', 'merged_dir', 'filter_dir', 'qc_dir',
                            'filtered_output_dir', 'premerged',
                            'objects_pattern', 'features_pattern',
@@ -431,6 +437,79 @@ class GuideConfig:
 
 
 @dataclass
+class ArchetypesConfig:
+    """Where the archetype analysis works, and what to run it on.
+
+    Every step reads and writes inside one directory per channel, so
+    ``outputs_dir`` is the whole data layout.  The tables and plots that
+    exist only to be read by a person go to ``reports_dir`` instead, as
+    the preprocessing plots do.
+    """
+    data_output_dir: str
+    local_output_dir: str
+    outputs_dir: str = 'archetypes/'
+    reports_dir: str = 'archetypes/'
+
+    #: Where the guide stage left the cell table the PCA step starts from.
+    features_dir: str = 'guide_filtering/guide_filtered/'
+    features_file: str = 'allwells-features_cell.parquet'
+
+    #: Channels to run.
+    channels: List[str] = field(default_factory=list)
+    #: Every channel the feature table holds.  Needed because a channel's
+    #: columns are found by removing the other channels', so a short list
+    #: here quietly keeps columns that belong to another stain.
+    all_channels: List[str] = field(default_factory=list)
+    #: gamma and k.knn pairs, swept for each channel.  The default is the
+    #: one pair the published run used for every channel; a sweep is only
+    #: worth the compute when the graining is being chosen afresh.
+    params: List[List[Any]] = field(default_factory=lambda: [[30, 10]])
+    #: Which swept pair carries on to the per-cell step.  Unset means the
+    #: first, which with the default sweep is the only one.
+    selected_params: Optional[List[Any]] = None
+    #: How many PCs to keep, per channel.  A channel left out of this gets
+    #: the elbow of its variance curve (default).
+    npc: Dict[str, int] = field(default_factory=dict)
+    #: How many archetypes, per channel.  A channel left out of this gets
+    #: the knee of its recovery curve, which is the usual case.
+    k: Dict[str, int] = field(default_factory=dict)
+
+    schema: SchemaConfig = field(default_factory=SchemaConfig)
+
+    @property
+    def features_path(self) -> str:
+        """The cell table every channel's space is built from."""
+        return join_path(join_path(self.data_output_dir, self.features_dir),
+                         self.features_file)
+
+    @property
+    def selected(self) -> List[Any]:
+        """The gamma and k.knn the later steps work from."""
+        if self.selected_params is not None:
+            return self.selected_params
+        if not self.params:
+            raise ValueError(f"'{ARCHETYPES_SECTION}.params' is empty, so "
+                             f"there is no pair to carry on with")
+        return self.params[0]
+
+    @property
+    def outputs_path(self) -> str:
+        return join_path(self.data_output_dir, self.outputs_dir)
+
+    @property
+    def reports_path(self) -> str:
+        return join_path(self.local_output_dir, self.reports_dir)
+
+    def channel_path(self, channel: str) -> str:
+        """The directory *channel*'s steps read from and write to."""
+        return join_path(self.outputs_path, channel)
+
+    def report_path(self, channel: str) -> str:
+        """Where *channel*'s diagnostics go, for people rather than steps."""
+        return join_path(self.reports_path, channel)
+
+
+@dataclass
 class PreprocessingConfig:
     """The three halves of the preprocessing stage.
 
@@ -614,6 +693,61 @@ def load_guide_config(source: Union[str, Dict[str, Any], GuideConfig]) -> GuideC
                        local_output_dir=config.get('local_output_dir', ''),
                        schema=_build_schema(config),
                        **{k: v for k, v in section.items() if k in _GUIDE_KEYS})
+
+
+def _archetype_params(params: Any, key: str = 'params') -> List[List[Any]]:
+    """Check the gamma/k.knn grid, which is easy to write the wrong shape.
+
+    A pair written as one string, the way params_adaptive.txt holds it, is
+    accepted as well as a list of two.
+    """
+    pairs = []
+    for entry in params or []:
+        pair = entry if isinstance(entry, (list, tuple)) else str(entry).split()
+        if len(pair) != 2:
+            raise ValueError(
+                f"Each entry of '{ARCHETYPES_SECTION}.{key}' names a gamma "
+                f"and a k.knn, so it holds two numbers; got {entry!r}")
+        for value in pair:
+            _as_float(value, key, ARCHETYPES_SECTION)
+        pairs.append(list(pair))
+    return pairs
+
+
+def load_archetypes_config(
+        source: Union[str, Dict[str, Any], ArchetypesConfig]) -> ArchetypesConfig:
+    """Build an :class:`ArchetypesConfig` from a file path or a mapping.
+
+    Only the archetypes section is checked here, for the same reason as
+    :func:`load_allwells_config`.
+    """
+    if isinstance(source, ArchetypesConfig):
+        return source
+
+    config = load_config_from_file(source) if isinstance(source, str) else source
+    if not isinstance(config, dict):
+        raise ValueError(f"Configuration must be a mapping, got {type(config).__name__}")
+
+    section = config.get(ARCHETYPES_SECTION)
+    if section is None:
+        section = {}
+    elif not isinstance(section, dict):
+        raise ValueError(f"'{ARCHETYPES_SECTION}' is present but holds no settings; "
+                         f"remove it or fill it in")
+    else:
+        _warn_unknown(section, _ARCHETYPES_KEYS, frozenset(), ARCHETYPES_SECTION)
+
+    settings = {k: v for k, v in section.items() if k in _ARCHETYPES_KEYS}
+    # Only when named, so that leaving either out keeps its default.
+    if 'params' in settings:
+        settings['params'] = _archetype_params(settings['params'])
+    if 'selected_params' in settings:
+        settings['selected_params'] = _archetype_params(
+            [settings['selected_params']], 'selected_params')[0]
+    return ArchetypesConfig(data_output_dir=config.get('data_output_dir', ''),
+                            local_output_dir=config.get('local_output_dir', ''),
+                            schema=_build_schema(config),
+                            **settings)
 
 
 def load_preprocessing_config(

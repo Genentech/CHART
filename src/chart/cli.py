@@ -12,6 +12,7 @@ import argparse
 from datetime import datetime
 from typing import List, Optional, Sequence
 
+from .archetypes import STEPS as ARCHETYPE_STEPS, run_archetypes
 from .io.config import join_path, load_preprocessing_config
 from .combining import AGGREGATION_LEVELS, LEVELS
 from .combining import METHODS as AGGREGATION_METHODS
@@ -63,6 +64,7 @@ def build_parser() -> argparse.ArgumentParser:
     subcommands = parser.add_subparsers(dest='command', required=True,
                                         metavar='<command>')
     _add_preprocessing_parser(subcommands)
+    _add_archetypes_parser(subcommands)
     return parser
 
 
@@ -144,6 +146,63 @@ def _add_preprocessing_parser(subcommands) -> None:
                             help='Skip pheno-SBS correlation analysis (use --components)')
 
     parser.set_defaults(func=_preprocessing_command)
+
+
+def _add_archetypes_parser(subcommands) -> None:
+    """Add the ``chart archetypes`` subcommand."""
+    parser = subcommands.add_parser(
+        'archetypes',
+        help='Run the archetype analysis',
+        description='Run the archetype analysis on one channel or all of '
+                    'them. The steps are R scripts, so this resolves the '
+                    'directory each one works in and calls them in order.')
+
+    parser.add_argument('--config', required=True,
+                        help='Path to configuration file (YAML or JSON)')
+
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument('--channel', nargs='+',
+                        help='Channel(s) to process')
+    target.add_argument('--all-channels', action='store_true',
+                        help='Process every channel named in the configuration')
+
+    parser.add_argument('--steps', nargs='+',
+                        choices=('all',) + ARCHETYPE_STEPS,
+                        default=['all'],
+                        help='Steps to run (default: all)')
+    parser.add_argument('--scripts-dir',
+                        help='Directory holding the R scripts (default: the '
+                             'copy that ships inside the package)')
+    parser.add_argument('--dry-run', action='store_true',
+                        help='Report the commands without running them, which '
+                             'needs no R installed')
+    parser.add_argument('--continue-on-error', action='store_true',
+                        help='Carry on when a step fails, instead of stopping')
+    parser.add_argument('--quiet', action='store_true',
+                        help='Log warnings and errors only')
+
+    parser.set_defaults(func=_archetypes_command)
+
+
+def _archetypes_command(args: argparse.Namespace) -> int:
+    """Hand over to the archetype analysis."""
+    logging.basicConfig(
+        level=logging.WARNING if args.quiet else logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s')
+
+    try:
+        results = run_archetypes(
+            args.config,
+            channels=None if args.all_channels else args.channel,
+            steps=args.steps,
+            scripts=args.scripts_dir,
+            dry_run=args.dry_run,
+            continue_on_error=args.continue_on_error)
+    except Exception as e:
+        logger.error(f"Archetypes failed: {e}", exc_info=True)
+        return 1
+
+    return 1 if any(result.failed for result in results) else 0
 
 
 def resolve_components(args: argparse.Namespace) -> List[str]:

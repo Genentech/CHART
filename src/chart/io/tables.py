@@ -29,6 +29,23 @@ def exists(path: str) -> bool:
     return filesystem.exists(inner)
 
 
+def table_columns(path: str) -> List[str]:
+    """The column names of the parquet at *path*, without reading any rows.
+
+    Wide tables are read a few hundred columns at a time, which means
+    knowing what is in them before asking for any of it.
+    """
+    import pyarrow.parquet as pq
+
+    if '://' not in path:
+        return list(pq.read_schema(path).names)
+
+    import fsspec
+    filesystem, inner = fsspec.core.url_to_fs(path)
+    with filesystem.open(inner, 'rb') as handle:
+        return list(pq.read_schema(handle).names)
+
+
 def list_dir(path: str) -> List[str]:
     """The filenames directly inside *path*, or nothing if it is absent."""
     if '://' not in path:

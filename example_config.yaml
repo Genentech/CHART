@@ -1,6 +1,6 @@
 # Example CHART configuration.  Copy this and edit the paths.
 #
-#   chart --config my_screen.yaml --all-wells
+#   chart preprocessing --config my_screen.yaml --all-wells
 #
 # Every key below except the two output directories is optional, and the
 # values shown are the defaults.  A file holding only those two runs the
@@ -48,6 +48,11 @@ preprocessing_bywell:
   # Whether to drop cells whose guide or gene is unassigned.  Keeping
   # them lets the QC reports show how many there were.
   drop_unassigned: false
+
+  # Where the input tables are read from.  A relative path is taken
+  # under data_output_dir, so set this to an absolute path or a URL when
+  # the input lives somewhere other than beside the outputs.
+  # merged_dir: /data/screen1/objects/
 
   # Input filenames.  '{well}' is substituted with the well being
   # processed.  Leave these out for '{well}-objects.parquet' and
@@ -103,3 +108,49 @@ preprocessing_allwells:
 guide_filtering:
   cosine_similarity_threshold: 0.2
   min_cells_per_guide: 50
+
+
+# Read by 'chart archetypes', not by the preprocessing steps.  Each
+# channel's steps work inside data_output_dir/outputs_dir/<channel>/,
+# starting from the cell_pca_centered.parquet the pca step writes there
+# out of the guide stage's cell table.  Outputs from an earlier run live
+# under 'tmp_archetype_outputs/', so name that here to carry on from them.
+archetypes:
+  outputs_dir: archetypes/
+
+  # The npc elbow, the partition comparison table and the K recovery
+  # curves, which nothing downstream reads.  Under local_output_dir.
+  reports_dir: archetypes/
+
+  # Channels to analyse.
+  channels: [TOM20, Golgin97]
+
+  # Every channel in the feature table.  The pca step builds a channel's
+  # space by removing the other channels' columns, which is what drops
+  # the colocalisation features naming two of them, so leaving a channel
+  # out here keeps its columns in everyone else's space.
+  all_channels: [DAPI1, TOM20, Golgin97, CALR, EEA1]
+
+  # gamma and k.knn, run as a grid for every channel.  The default is the
+  # single pair below, which is what the published run used for all of its
+  # channels.  Add rows to sweep, at the cost of running the metacells and
+  # archetypes steps once per row.
+  params:
+    - [30, 10]
+
+  # How many PCs to keep.  A channel left out gets the elbow of its own
+  # variance curve, which is the usual case.
+  # npc:
+  #   TOM20: 14
+
+  # Which of the swept pairs above the selectk and weights steps work
+  # from.  Unset means the first one, which is the only one unless a
+  # sweep was added.
+  # selected_params: [30, 10]
+
+  # How many archetypes.  A channel left out gets the knee of its
+  # recovery curve, which the selectk step writes to k.txt for the
+  # weights step to read.  Set it here to overrule that, after looking at
+  # the curve the selectk step leaves under reports_dir.
+  # k:
+  #   TOM20: 12
