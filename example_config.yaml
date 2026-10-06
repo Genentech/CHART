@@ -135,3 +135,14 @@ archetypes:
   # variance curve, which is the usual case.
   # npc:
   #   TOM20: 14
+
+  # Which of the swept pairs above the selectk and weights steps work
+  # from.  Unset means the first one.
+  # selected_params: [10, 10]
+
+  # How many archetypes.  A channel left out gets the knee of its
+  # recovery curve, which the selectk step writes to k.txt for the
+  # weights step to read.  Set it here to overrule that, after looking at
+  # the curve the selectk step leaves under reports_dir.
+  # k:
+  #   TOM20: 12

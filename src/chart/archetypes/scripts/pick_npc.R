@@ -39,8 +39,10 @@ pick_npc_by_elbow <- function(scores, npc_min = 10, npc_max = 60, use_log = TRUE
   bend <- elbow_index(idx, y)
   k_elbow <- bend$at
 
-  # Clamp
-  npc <- max(npc_min, min(k_elbow, npc_max))
+  # Clamp.  npc_max is the last component there is, so it binds last:
+  # raising a small elbow to npc_min must not ask for more than exist,
+  # or every file named after npc would claim components it has not got.
+  npc <- min(max(npc_min, k_elbow), npc_max)
 
   list(
     npc = npc,

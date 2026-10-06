@@ -11,6 +11,7 @@ from .workflow import (
     PER_PARAMS,
     PYTHON_STEPS,
     SCRIPTS,
+    SELECTED_PAIR,
     STEPS,
     StepResult,
     run_archetypes,
@@ -25,6 +26,7 @@ __all__ = [
     'SCRIPTS',
     'PYTHON_STEPS',
     'PER_PARAMS',
+    'SELECTED_PAIR',
     'ENV_DIR',
     'ENV_REPORTS'
 ]

@@ -79,8 +79,11 @@ saveRDS(supercells, paste0(outdir,"/supercells-",channel,
                            "_gamma",gamma,"_knn",k.knn,'_npc',n.pc,".rds"))
 message("Supercell RDS object saved")
 
-# Aggregate to mean
-aggregated <- supercell_GE(t(pca), supercells$membership)
+# Aggregate to mean.  Only the components the metacells were built from,
+# because the file is named after that count and the archetypes step
+# writes the same name from the same columns; a wider file here would
+# make what the name means depend on which step wrote it last.
+aggregated <- supercell_GE(t(pca[, 1:n.pc]), supercells$membership)
 
 # Write metacell coordinates
 write_parquet(as.data.frame(t(as.matrix(aggregated))),

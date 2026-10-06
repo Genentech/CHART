@@ -235,62 +235,43 @@ if (basename(chan_dir) != channel) {
 }
 indir = paste0(dirname(chan_dir), "/")
 
-# Auto-detect npc from existing supercell files
-message("Auto-detecting npc for channel ", channel, " with gamma=", gamma, ", knn=", knn)
-pattern <- if(pw) {
-  sprintf("supercells-%s_gamma%s_knn%s_npc*_pw.rds", channel, gamma, knn)
-} else {
-  sprintf("supercells-%s_gamma%s_knn%s_npc*.rds", channel, gamma, knn)
+# Taken from where the npc step wrote its decision, rather than read back
+# out of a file name.  A run left over from an earlier npc leaves a file
+# that fits the naming pattern as well as the current one does, and
+# picking between them by name picks the lower number, not the current.
+npc_file <- paste0(indir, channel, "/npc.txt")
+if(!file.exists(npc_file)) {
+  stop("No npc.txt beside ", channel, "'s data in ", paste0(indir, channel),
+       ". Run the npc step first.")
 }
-sc_files <- Sys.glob(file.path(indir, channel, pattern))
-if(pw) {
-  # Ensure we only get _pw files
-  sc_files <- sc_files[grepl("_pw\\.rds$", sc_files)]
-} else {
-  # Ensure we exclude _pw files
-  sc_files <- sc_files[!grepl("_pw\\.rds$", sc_files)]
+npc <- suppressWarnings(as.integer(readLines(npc_file, warn = FALSE)[1]))
+if(is.na(npc) || npc < 1) {
+  stop(npc_file, " does not hold a number of components")
+}
+message("Using npc = ", npc, " from npc.txt")
+
+sc_file <- paste0(indir, channel, "/supercells-", channel, "_gamma", gamma,
+                  "_knn", knn, "_npc", npc, if(pw) "_pw" else "", ".rds")
+if(!file.exists(sc_file)) {
+  stop("npc.txt says ", npc, " components, but there are no metacells for ",
+       "that at ", basename(sc_file), ". Re-run the metacells step for ",
+       "gamma ", gamma, " knn ", knn, ", or check which npc its files name.")
 }
 
-if(length(sc_files) == 0) {
-  stop("No supercell files found matching pattern: ", file.path(indir, channel, pattern))
-}
-if(length(sc_files) > 1) {
-  warning("Multiple supercell files found, using first: ", basename(sc_files[1]))
-}
-
-# Parse npc from filename
-sc_file <- sc_files[1]
-npc_match <- regexec("_npc([0-9]+)", basename(sc_file))
-npc_str <- regmatches(basename(sc_file), npc_match)[[1]][2]
-npc <- as.numeric(npc_str)
-message("Auto-detected npc = ", npc)
-
+supercells <- readRDS(sc_file)
 if(pw){
-  supercells <- readRDS(paste0(indir,channel,"/supercells-",channel,
-                               "_gamma",gamma,"_knn",knn,"_npc",npc,"_pw.rds"))
   pca <- readRDS(paste0(indir,channel,"/cell_pca_centered_pw.rds"))
   scores <- pca$scores
 } else{
-  supercells <- readRDS(paste0(indir,channel,"/supercells-",channel,
-                               "_gamma",gamma,"_knn",knn,"_npc",npc,".rds"))
   scores <- read_parquet(paste0(indir,channel,"/cell_pca_centered.parquet"))
 }
 
 # Aggregate to mean
 aggregated <- supercell_GE(t(scores[,1:npc]), supercells$membership)
 
-# Write metacell coordinates
-if(pw){
-  write_parquet(as.data.frame(t(as.matrix(aggregated))),
-                paste0(indir,channel,'/supercells-',channel,'_gamma',gamma,
-                       '_knn',knn,'_npc',npc,'_pw.parquet'))
-} else{
-  write_parquet(as.data.frame(t(as.matrix(aggregated))),
-                paste0(indir,channel,'/supercells-',channel,'_gamma',gamma,
-                       '_knn',knn,'_npc',npc,'.parquet'))
-}
-
-message("Supercell PC coordinates saved to parquet file")
+# The metacells step already wrote these coordinates under this name, so
+# they are not written again here.  Two steps writing one name meant
+# whichever ran last decided what the file held.
 rm(pca); gc(FALSE)
 
 res <- run_one_space(t(as.matrix(aggregated)))

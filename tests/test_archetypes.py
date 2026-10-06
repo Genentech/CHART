@@ -113,7 +113,32 @@ def test_every_step_runs_in_order():
         'eval_spaces_perchannel',
         'robust_archetyping', 'robust_archetyping',
         'test_evalK_onfullPC',
+        'archetype_weights',
     ]
+
+
+def test_the_weights_come_after_the_k_they_need():
+    assert STEPS.index('weights') > STEPS.index('selectk')
+
+
+def test_a_configured_k_reaches_the_steps_that_use_it():
+    for step in ('selectk', 'weights'):
+        line = commands(steps=[step], k={CHANNEL: 12})[0]
+        assert line.endswith(f'{CHANNEL} FALSE 10 10 12'), step
+
+
+def test_without_a_configured_k_the_steps_find_it_themselves():
+    # selectk picks it and writes k.txt; weights reads that.  Neither can
+    # be told on the command line here, because the whole run is planned
+    # before selectk has written anything.
+    for step in ('selectk', 'weights'):
+        line = commands(steps=[step])[0]
+        assert line.endswith(f'{CHANNEL} FALSE 10 10'), step
+
+
+def test_the_weights_step_works_from_the_chosen_pair():
+    line = commands(steps=['weights'], selected_params=[30, 5])[0]
+    assert line.endswith(f'{CHANNEL} FALSE 30 5')
 
 
 def test_the_steps_that_vary_run_once_per_pair():
@@ -157,7 +182,7 @@ def test_the_scripts_ship_inside_the_package():
     assert {script.name for script in scripts_dir().glob('*.R')} >= {
         'pick_npc.R', 'metacell_adaptive_npc.R', 'eval_spaces_perchannel.R'}
     # One per R script, plus the pca step CHART runs itself.
-    assert len(STEPS) == 6
+    assert len(STEPS) == 7
 
 
 def test_every_script_a_step_names_is_there():

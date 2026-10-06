@@ -40,6 +40,7 @@ SCRIPTS = {
     'evaluate': 'eval_spaces_perchannel.R',
     'archetypes': 'robustAA/robust_archetyping.R',
     'selectk': 'robustAA/test_evalK_onfullPC.R',
+    'weights': 'robustAA/archetype_weights.R',
 }
 
 #: Steps CHART runs itself rather than handing to an R script.
@@ -50,6 +51,9 @@ STEPS = PYTHON_STEPS + tuple(SCRIPTS)
 
 #: Steps that run once per gamma/k.knn pair rather than once per channel.
 PER_PARAMS = ('metacells', 'archetypes')
+
+#: Steps that work from the one chosen pair, and take the same arguments.
+SELECTED_PAIR = ('selectk', 'weights')
 
 
 @dataclass
@@ -94,8 +98,9 @@ def _arguments(step: str, config: ArchetypesConfig, channel: str,
         return arguments + ([str(npc)] if npc is not None else [])
     if step == 'archetypes':
         return [str(pair[0]), str(pair[1]), channel, 'FALSE']
-    if step == 'selectk':
+    if step in SELECTED_PAIR:
         # Which swept pair carries on, and whether K was decided already.
+        # Left out, selectk picks it and weights reads what it picked.
         gamma, knn = config.selected
         arguments = [channel, 'FALSE', str(gamma), str(knn)]
         k = config.k.get(channel)
