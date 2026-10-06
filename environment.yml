@@ -1,0 +1,35 @@
+# The R side of CHART, which the archetypes stage runs through Rscript.
+# The rest of CHART is Python and installs with the package.
+#
+#   mamba env create -f environment.yml
+#   conda activate chart-r
+#   Rscript -e 'install.packages("archetypes", repos="https://cloud.r-project.org")'
+#
+# That last line is needed because 'archetypes' is on CRAN but has not
+# been packaged for conda-forge.  Its own dependencies are listed below,
+# so the install finds them rather than compiling them.
+name: chart-r
+channels:
+  - conda-forge
+dependencies:
+  # The scripts are written against 4.5; r-supercell is built per R
+  # minor version, so this and the build it resolves to have to agree.
+  - r-base >=4.5,<4.6
+
+  # Named by the scripts.  Each brings its own dependencies, which is
+  # why SuperCell's two dozen imports are not listed here.
+  - r-supercell      # metacells from a channel's PCA embedding
+  - r-arrow          # the parquet files the steps hand to each other
+  - r-fnn            # nearest neighbours, for the partition measures
+  - r-quadprog       # projects metacells onto the archetype simplex
+  - r-clue           # matches archetypes between runs, to measure drift
+  # Named here as well as reached through r-supercell, because the
+  # selectk step calls them itself and so must not depend on another
+  # package's dependencies to have them.
+  - r-dplyr          # the recovery curve table
+  - r-ggplot2        # the recovery curve plot
+
+  # What 'archetypes' needs, installed here so that the CRAN step above
+  # does not have to build them from source.
+  - r-modeltools
+  - r-nnls

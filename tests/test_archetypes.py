@@ -7,13 +7,16 @@ arguments it reads.  ``dry_run`` reports the commands without running
 them, so none of this needs R installed.
 """
 
+import re
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
 import chart.archetypes
-from chart.archetypes import (ENV_DIR, ENV_REPORTS, SCRIPTS, STEPS,
-                              run_archetypes, scripts_dir)
+from chart.archetypes import (ENV_DIR, ENV_REPORTS, R_PACKAGES, SCRIPTS,
+                              STEPS, run_archetypes, scripts_dir)
+from chart.archetypes import workflow
 from chart.io.config import load_archetypes_config
 
 CHANNEL = 'TOM20'
@@ -190,3 +193,35 @@ def test_every_script_a_step_names_is_there():
     # no glob reaches would be missing from an install only.
     for step, script in SCRIPTS.items():
         assert (scripts_dir() / script).exists(), step
+
+
+def test_the_r_packages_checked_for_are_the_ones_the_scripts_load():
+    # The list is written out rather than read off the scripts, so this
+    # is what stops the two drifting.  dplyr and ggplot2 were missing
+    # from it once, and ran only because SuperCell happens to pull them.
+    loaded = set()
+    for script in scripts_dir().rglob('*.R'):
+        loaded |= set(re.findall(r'(?:library|require)\(([A-Za-z0-9._]+)\)',
+                                 script.read_text()))
+    assert loaded == set(R_PACKAGES)
+
+
+def test_a_missing_r_is_reported_before_any_step_runs():
+    with mock.patch.object(workflow.shutil, 'which', return_value=None):
+        with pytest.raises(RuntimeError, match='environment.yml'):
+            run_archetypes(config(), channels=[CHANNEL], steps=['metacells'])
+
+
+def test_a_dry_run_asks_nothing_of_r():
+    # Planning is what --dry-run is for, so it has to work on a machine
+    # with no R at all.
+    with mock.patch.object(workflow, '_check_r') as checked:
+        commands(steps=['all'])
+    checked.assert_not_called()
+
+
+def test_the_pca_step_alone_asks_nothing_of_r():
+    with mock.patch.object(workflow, '_check_r') as checked:
+        with mock.patch.object(workflow, '_run_pca'):
+            run_archetypes(config(), channels=[CHANNEL], steps=['pca'])
+    checked.assert_not_called()

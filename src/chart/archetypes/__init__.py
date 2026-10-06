@@ -10,6 +10,7 @@ from .workflow import (
     ENV_REPORTS,
     PER_PARAMS,
     PYTHON_STEPS,
+    R_PACKAGES,
     SCRIPTS,
     SELECTED_PAIR,
     STEPS,
@@ -27,6 +28,7 @@ __all__ = [
     'PYTHON_STEPS',
     'PER_PARAMS',
     'SELECTED_PAIR',
+    'R_PACKAGES',
     'ENV_DIR',
     'ENV_REPORTS'
 ]

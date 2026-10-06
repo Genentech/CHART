@@ -11,6 +11,19 @@
 - **Automated archetype annotation** — contrastive image analysis and standardized reports generated with multimodal language models and user review.
 - **Morphological program definition** — integration of co-regulated archetypes into interpretable programs of coordinated cellular change.
 
+## Requirements
+
+Most of CHART is Python and arrives with the package. The archetype
+analysis is the exception: every step of it but the first is an R script
+that `chart archetypes` runs through `Rscript`, so that stage needs R and
+eight R packages. `environment.yml` describes them:
+
+```
+mamba env create -f environment.yml
+conda activate chart-r
+Rscript -e 'install.packages("archetypes", repos="https://cloud.r-project.org")'
+```
+
 ## Configuration
 
 Every step reads one YAML file, given with `--config`:

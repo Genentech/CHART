@@ -55,6 +55,12 @@ PER_PARAMS = ('metacells', 'archetypes')
 #: Steps that work from the one chosen pair, and take the same arguments.
 SELECTED_PAIR = ('selectk', 'weights')
 
+#: Everything the scripts load, checked before the first one runs.  They
+#: are installed together by environment.yml, and the steps share most of
+#: them, so the whole set is asked for rather than a set per step.
+R_PACKAGES = ('SuperCell', 'archetypes', 'arrow', 'FNN', 'quadprog', 'clue',
+              'dplyr', 'ggplot2')
+
 
 @dataclass
 class StepResult:
@@ -121,6 +127,39 @@ def _run_pca(config: ArchetypesConfig, channel: str) -> str:
     return write_channel_pca(config.features_path, channel,
                              config.all_channels,
                              config.channel_path(channel), config.schema)
+
+
+def _check_r() -> None:
+    """Say what R is missing before the first step, not partway through.
+
+    Otherwise a package the last step needs is reported only once the
+    steps before it have spent their hours.
+    """
+    if not shutil.which('Rscript'):
+        raise RuntimeError("Rscript is not on PATH, and all but the pca step "
+                           "are R scripts; create the environment described "
+                           "in environment.yml, ask for --steps pca, or run "
+                           "with --dry-run")
+
+    # Loaded rather than looked for on disk, because r-supercell and the
+    # other compiled packages are built against one R minor version, so a
+    # package can be installed and still not load.
+    names = ', '.join(f'"{package}"' for package in R_PACKAGES)
+    probe = (f'cat(Filter(function(p) !suppressWarnings(suppressMessages('
+             f'require(p, character.only = TRUE, quietly = TRUE))), '
+             f'c({names})), sep = " ")')
+    asked = subprocess.run(['Rscript', '-e', probe],
+                           capture_output=True, text=True)
+    if asked.returncode != 0:
+        raise RuntimeError(f"Rscript is on PATH but could not be asked what "
+                           f"it has installed:\n{asked.stderr.strip()}")
+
+    missing = asked.stdout.split()
+    if missing:
+        raise RuntimeError(f"R cannot load {', '.join(missing)}, which the "
+                           f"archetype scripts need; the environment "
+                           f"described in environment.yml has every package "
+                           f"they load")
 
 
 def _planned(config: ArchetypesConfig, channels: Sequence[str],
@@ -192,10 +231,8 @@ def run_archetypes(config: Union[str, Dict[str, Any], ArchetypesConfig],
                        Path(scripts) if scripts else scripts_dir())
 
     needs_r = any(result.step not in PYTHON_STEPS for result in planned)
-    if needs_r and not dry_run and not shutil.which('Rscript'):
-        raise RuntimeError("Rscript is not on PATH, and all but the pca step "
-                           "are R scripts; install R, ask for --steps pca, or "
-                           "run with --dry-run")
+    if needs_r and not dry_run:
+        _check_r()
 
     logger.info(f"Archetypes: {len(planned)} invocations across "
                 f"{len(channels)} channels")

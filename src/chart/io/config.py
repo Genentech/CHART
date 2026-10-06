@@ -454,15 +454,16 @@ class ArchetypesConfig:
     features_dir: str = 'guide_filtering/guide_filtered/'
     features_file: str = 'allwells-features_cell.parquet'
 
-    #: Channels to run.  Replaces the channels_subset.txt the scripts read.
+    #: Channels to run.
     channels: List[str] = field(default_factory=list)
     #: Every channel the feature table holds.  Needed because a channel's
     #: columns are found by removing the other channels', so a short list
     #: here quietly keeps columns that belong to another stain.
     all_channels: List[str] = field(default_factory=list)
-    #: gamma and k.knn pairs, swept for each channel.  Replaces
-    #: params_adaptive.txt.
-    params: List[List[Any]] = field(default_factory=lambda: [[10, 10]])
+    #: gamma and k.knn pairs, swept for each channel.  The default is the
+    #: one pair the published run used for every channel; a sweep is only
+    #: worth the compute when the graining is being chosen afresh.
+    params: List[List[Any]] = field(default_factory=lambda: [[30, 10]])
     #: Which swept pair carries on to the per-cell step.  Unset means the
     #: first, which with the default sweep is the only one.
     selected_params: Optional[List[Any]] = None

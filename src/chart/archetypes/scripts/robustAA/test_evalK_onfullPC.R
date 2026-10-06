@@ -20,15 +20,17 @@ if (length(args) < 1) {
   stop("Usage: Rscript test_evalK_onfullPC.R <channel> [use_pw] [gamma] [knn] [k]\n",
        "  channel: Channel name (e.g., DAPI1, Golgin97, Fibrillarin)\n",
        "  use_pw:  Optional, TRUE or FALSE (default: FALSE)\n",
-       "  gamma, knn: which config's curve K is chosen from (default 10 10)\n",
+       "  gamma, knn: which config's curve K is chosen from (default 30 10)\n",
        "  k:       Optional, the K to use instead of the knee of that curve")
 }
 
 channel <- args[1]
 
 # Which of the swept configs carries on to the per-cell step, and whether
-# its K was decided already.
-sel_gamma <- if (length(args) >= 3) args[3] else "10"
+# its K was decided already.  The defaults are the pair the published run
+# used for every channel, for running this by hand; 'chart archetypes'
+# passes whichever pair the config names.
+sel_gamma <- if (length(args) >= 3) args[3] else "30"
 sel_knn <- if (length(args) >= 4) args[4] else "10"
 sel_k <- if (length(args) >= 5) as.integer(args[5]) else NA_integer_
 if (length(args) >= 5 && is.na(sel_k)) {

@@ -126,10 +126,12 @@ archetypes:
   # out here keeps its columns in everyone else's space.
   all_channels: [DAPI1, TOM20, Golgin97, CALR, EEA1]
 
-  # gamma and k.knn, run as a grid for every channel.
+  # gamma and k.knn, run as a grid for every channel.  The default is the
+  # single pair below, which is what the published run used for all of its
+  # channels.  Add rows to sweep, at the cost of running the metacells and
+  # archetypes steps once per row.
   params:
-    - [10, 10]
-    - [30, 5]
+    - [30, 10]
 
   # How many PCs to keep.  A channel left out gets the elbow of its own
   # variance curve, which is the usual case.
@@ -137,8 +139,9 @@ archetypes:
   #   TOM20: 14
 
   # Which of the swept pairs above the selectk and weights steps work
-  # from.  Unset means the first one.
-  # selected_params: [10, 10]
+  # from.  Unset means the first one, which is the only one unless a
+  # sweep was added.
+  # selected_params: [30, 10]
 
   # How many archetypes.  A channel left out gets the knee of its
   # recovery curve, which the selectk step writes to k.txt for the

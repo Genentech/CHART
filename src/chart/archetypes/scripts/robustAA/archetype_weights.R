@@ -13,14 +13,16 @@ if (length(args) < 1) {
        "  channel: Channel name (e.g., DAPI1, Golgin97, Fibrillarin)\n",
        "  use_pw:  Optional, TRUE or FALSE (default: FALSE)\n",
        "  gamma, knn: which swept config to take the metacells from ",
-       "(default 10 10)\n",
+       "(default 30 10)\n",
        "  k:       Optional, how many archetypes; the k.txt the selectk ",
        "step wrote is read when this is left out")
 }
 
 channel <- args[1]
 use_pw <- if (length(args) >= 2) as.logical(args[2]) else FALSE
-sel_gamma <- if (length(args) >= 3) args[3] else "10"
+# The pair the published run used for every channel, for running this by
+# hand; 'chart archetypes' passes whichever pair the config names.
+sel_gamma <- if (length(args) >= 3) args[3] else "30"
 sel_knn <- if (length(args) >= 4) args[4] else "10"
 sel_k <- if (length(args) >= 5) as.integer(args[5]) else NA_integer_
 if (length(args) >= 5 && is.na(sel_k)) {
