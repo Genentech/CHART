@@ -116,6 +116,10 @@ def write_channel_pca(features_path: str, channel: str,
 
     data = pd.read_parquet(features_path,
                            columns=features + list(INDEX_COLUMNS))
+    # The guide-filtered table stores these four as its pandas index, and
+    # read_parquet puts them back there rather than in the columns.
+    if any(name not in data.columns for name in INDEX_COLUMNS):
+        data = data.reset_index()
     space = center_on_controls(
         generate_pca_space(data.set_index(list(INDEX_COLUMNS))), schema)
 
