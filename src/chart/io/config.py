@@ -16,7 +16,7 @@ import yaml
 from dataclasses import dataclass, field, fields, replace
 from typing import Any, Dict, List, Optional, Union
 
-from .tables import list_dir
+from .tables import exists, list_dir
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +152,8 @@ ARCHETYPES_SECTION = 'archetypes'
 
 _ARCHETYPES_KEYS = frozenset({'outputs_dir', 'reports_dir', 'features_dir',
                               'features_file', 'channels', 'all_channels',
-                              'params', 'selected_params', 'npc', 'k'})
+                              'params', 'selected_params', 'npc', 'k',
+                              'archetypes_to_remove', 'effects'})
 
 _TOP_LEVEL_KEYS = frozenset({'data_output_dir', 'local_output_dir',
                              SECTION_NAME, ALLWELLS_SECTION, GUIDE_SECTION,
@@ -437,6 +438,29 @@ class GuideConfig:
 
 
 @dataclass
+class EffectsConfig:
+    """The perturbation-effect test, run on each channel's weights."""
+    n_perm: int = 1000
+    trimmed_alpha: float = 0.02
+    seed: int = 42
+    #: Worker processes; -1 uses every core.
+    n_jobs: int = -1
+
+
+def _read_count(path: str, remedy: str) -> int:
+    """The whole number a step left on the first line of *path*."""
+    if not exists(path):
+        raise FileNotFoundError(f"No {path.rsplit('/', 1)[-1]} at {path}; {remedy}")
+    if '://' in path:
+        import fsspec
+        opener = fsspec.open
+    else:
+        opener = open
+    with opener(path, 'r') as handle:
+        return int(handle.readline())
+
+
+@dataclass
 class ArchetypesConfig:
     """Where the archetype analysis works, and what to run it on.
 
@@ -473,6 +497,11 @@ class ArchetypesConfig:
     #: How many archetypes, per channel.  A channel left out of this gets
     #: the knee of its recovery curve, which is the usual case.
     k: Dict[str, int] = field(default_factory=dict)
+    #: Archetypes to leave out, as ``<channel>_ArchetypeN`` lists under
+    #: any category names.  Optional, since leaving one out only drops
+    #: its rows and can as well be done downstream.
+    archetypes_to_remove: Dict[str, List[str]] = field(default_factory=dict)
+    effects: EffectsConfig = field(default_factory=EffectsConfig)
 
     schema: SchemaConfig = field(default_factory=SchemaConfig)
 
@@ -508,6 +537,33 @@ class ArchetypesConfig:
         """Where *channel*'s diagnostics go, for people rather than steps."""
         return join_path(self.reports_path, channel)
 
+    def weights_path(self, channel: str) -> str:
+        """The table the weights step wrote for *channel*.
+
+        Named the way the step names it rather than found by listing the
+        directory, where a run with an earlier K or npc leaves a file that
+        fits as well.
+        """
+        directory = self.channel_path(channel)
+        k = self.k.get(channel)
+        if k is None:
+            k = _read_count(join_path(directory, 'k.txt'),
+                            f"run the selectk step or set "
+                            f"'{ARCHETYPES_SECTION}.k' for {channel}")
+        npc = _read_count(join_path(directory, 'npc.txt'), "run the npc step")
+        if self.npc.get(channel, npc) != npc:
+            raise ValueError(
+                f"'{ARCHETYPES_SECTION}.npc' gives {self.npc[channel]} for "
+                f"{channel} but its npc.txt holds {npc}, so the weights were "
+                f"built with another npc; rerun from the npc step")
+        gamma, knn = self.selected
+        path = join_path(directory, f'robust_archweights-{channel}_k{k}_gamma'
+                                    f'{gamma}_knn{knn}_npc{npc}.parquet')
+        if not exists(path):
+            raise FileNotFoundError(f"No archetype weights for {channel} at "
+                                    f"{path}; run the weights step")
+        return path
+
 
 @dataclass
 class PreprocessingConfig:
@@ -522,6 +578,7 @@ class PreprocessingConfig:
 
 
 _THRESHOLD_KEYS = frozenset(f.name for f in fields(Thresholds))
+_EFFECTS_KEYS = frozenset(f.name for f in fields(EffectsConfig))
 _WELL_KEYS = frozenset(f.name for f in fields(WellConfig)) - {'well'}
 _SCHEMA_KEYS = frozenset(f.name for f in fields(SchemaConfig))
 
@@ -744,6 +801,22 @@ def load_archetypes_config(
     if 'selected_params' in settings:
         settings['selected_params'] = _archetype_params(
             [settings['selected_params']], 'selected_params')[0]
+    if 'effects' in settings:
+        block = settings['effects'] or {}
+        _warn_unknown(block, _EFFECTS_KEYS, frozenset(),
+                      f'{ARCHETYPES_SECTION}.effects')
+        settings['effects'] = EffectsConfig(
+            **{k: v for k, v in block.items() if k in _EFFECTS_KEYS})
+    if 'archetypes_to_remove' in settings:
+        removal = settings['archetypes_to_remove'] or {}
+        # A category whose names are all commented out reads as None.
+        if not isinstance(removal, dict) or not all(
+                isinstance(names, (list, type(None))) for names in removal.values()):
+            raise ValueError(f"'{ARCHETYPES_SECTION}.archetypes_to_remove' "
+                             f"holds lists of archetype names under category "
+                             f"names; got {removal!r}")
+        settings['archetypes_to_remove'] = {
+            category: list(names or []) for category, names in removal.items()}
     return ArchetypesConfig(data_output_dir=config.get('data_output_dir', ''),
                             local_output_dir=config.get('local_output_dir', ''),
                             schema=_build_schema(config),

@@ -4,22 +4,27 @@ The archetypes stage: path resolution and the commands it builds.
 The steps themselves are R scripts, so what is worth testing on this side
 is that the right script is called, in the right directory, with the
 arguments it reads.  ``dry_run`` reports the commands without running
-them, so none of this needs R installed.
+them, so none of this needs R installed.  The effects step is CHART's
+own, so it is tested on a small table of weights instead.
 """
 
 import re
 from pathlib import Path
 from unittest import mock
 
+import numpy as np
+import pandas as pd
 import pytest
+from scipy.stats import wasserstein_distance
 
 import chart.archetypes
 from chart.archetypes import (ENV_DIR, ENV_REPORTS, R_PACKAGES, SCRIPTS,
                               STEPS, run_archetypes, scripts_dir)
-from chart.archetypes import workflow
-from chart.io.config import load_archetypes_config
+from chart.archetypes import effects, workflow
+from chart.io.config import EffectsConfig, load_archetypes_config
 
 CHANNEL = 'TOM20'
+PARAMS = EffectsConfig(n_perm=20, n_jobs=1)
 
 
 def config(**overrides):
@@ -117,6 +122,7 @@ def test_every_step_runs_in_order():
         'robust_archetyping', 'robust_archetyping',
         'test_evalK_onfullPC',
         'archetype_weights',
+        'effects [in CHART] TOM20',
     ]
 
 
@@ -184,8 +190,8 @@ def test_the_scripts_ship_inside_the_package():
     assert scripts_dir().is_relative_to(Path(chart.archetypes.__file__).parent)
     assert {script.name for script in scripts_dir().glob('*.R')} >= {
         'pick_npc.R', 'metacell_adaptive_npc.R', 'eval_spaces_perchannel.R'}
-    # One per R script, plus the pca step CHART runs itself.
-    assert len(STEPS) == 7
+    # One per R script, plus the pca and effects steps CHART runs itself.
+    assert len(STEPS) == 8
 
 
 def test_every_script_a_step_names_is_there():
@@ -225,3 +231,76 @@ def test_the_pca_step_alone_asks_nothing_of_r():
         with mock.patch.object(workflow, '_run_pca'):
             run_archetypes(config(), channels=[CHANNEL], steps=['pca'])
     checked.assert_not_called()
+
+
+def test_the_effects_step_alone_asks_nothing_of_r():
+    with mock.patch.object(workflow, '_check_r') as checked:
+        with mock.patch.object(workflow, '_run_effects') as ran:
+            run_archetypes(config(), channels=[CHANNEL], steps=['effects'])
+    checked.assert_not_called()
+    ran.assert_called_once()
+
+
+def weights():
+    rng = np.random.default_rng(0)
+    genes = np.repeat(['NTC', 'OR1A1', 'GENEA', 'GENEB', 'GENEC'], 40)
+    table = pd.DataFrame(rng.dirichlet(np.ones(4), size=len(genes)),
+                         columns=[f'Archetype{k}' for k in range(1, 5)])
+    table['Well'] = np.where(genes == 'GENEC', 'C9',
+                             np.tile(['A1', 'A2'], len(genes) // 2))
+    table['Label'], table['Guide'], table['Gene'] = range(len(genes)), genes, genes
+    return table
+
+
+def test_the_fast_distance_is_the_wasserstein_distance():
+    rng = np.random.default_rng(1)
+    v, p, q = np.sort(rng.normal(size=50)), rng.random(50), rng.random(50)
+    assert (effects.wasserstein_1d_same_support(v, p, q)
+            == pytest.approx(wasserstein_distance(v, v, p, q)))
+
+
+def test_each_archetype_is_seeded_by_its_gene_and_position():
+    table, _ = effects.gene_effects(weights(), 'CALR', params=PARAMS)
+    data = weights()
+    use = data.Gene.isin(['GENEB', 'NTC', 'OR1A1']).to_numpy()
+    expected = effects.w1_with_stratified_permutation(
+        effects.clr_transform(data.filter(like='Archetype').to_numpy())[use, 2],
+        (data.Gene[use] == 'GENEB').to_numpy(), data.Well[use].to_numpy(),
+        PARAMS.n_perm, PARAMS.seed + 1 + 2, PARAMS.trimmed_alpha)
+    row = table[(table.Gene == 'GENEB') & (table.Archetype == 'CALR_Archetype3')]
+    assert row.pval.item() == expected['pval']
+    assert row.w1.item() == expected['w1']
+
+
+def test_leaving_an_archetype_out_changes_nothing_else():
+    full, skipped = effects.gene_effects(weights(), 'CALR', params=PARAMS)
+    fewer, _ = effects.gene_effects(weights(), 'CALR', ['CALR_Archetype2'],
+                                    PARAMS)
+    pd.testing.assert_frame_equal(
+        fewer, full[full.Archetype != 'CALR_Archetype2'].reset_index(drop=True))
+    assert skipped == ['GENEC']
+
+
+def test_an_archetype_the_channel_lacks_cannot_be_removed():
+    with pytest.raises(ValueError, match='CALR_Archetype9'):
+        effects.gene_effects(weights(), 'CALR', ['CALR_Archetype9'], PARAMS)
+
+
+def with_npc_txt(tmp_path, **overrides):
+    resolved = load_archetypes_config({**config(k={CHANNEL: 4}, **overrides),
+                                       'data_output_dir': str(tmp_path)})
+    directory = Path(resolved.channel_path(CHANNEL))
+    directory.mkdir(parents=True)
+    (directory / 'npc.txt').write_text('8\n')
+    return resolved
+
+
+def test_missing_weights_are_reported_by_path(tmp_path):
+    with pytest.raises(FileNotFoundError,
+                       match=f'robust_archweights-{CHANNEL}_k4_gamma10_knn10_npc8'):
+        with_npc_txt(tmp_path).weights_path(CHANNEL)
+
+
+def test_a_configured_npc_must_agree_with_npc_txt(tmp_path):
+    with pytest.raises(ValueError, match='npc.txt holds 8'):
+        with_npc_txt(tmp_path, npc={CHANNEL: 12}).weights_path(CHANNEL)
