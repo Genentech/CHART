@@ -1,16 +1,15 @@
 """
-The effects step: how far each gene moves each archetype's weights away
-from the controls.  The distance pools the control cells of every well
-the gene appears in; the p-value shuffles the labels within each well.
+Perturbation effects: how far each gene moves each archetype's weights
+away from the controls.  The distance pools the control cells of every
+well the gene appears in; the p-value shuffles the labels within each well.
 """
 
 import json
 import logging
 import os
 from concurrent.futures import ProcessPoolExecutor
-from dataclasses import asdict
 from datetime import datetime
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
@@ -19,13 +18,12 @@ from .. import __version__
 from ..dimred.channels import INDEX_COLUMNS
 from ..dimred.pca import NoControlsError, control_mask
 from ..io.config import (ARCHETYPES_SECTION, ArchetypesConfig, EffectsConfig,
-                         SchemaConfig, join_path)
+                         SchemaConfig, join_path, load_archetypes_config,
+                         load_effects_config)
 from ..io.tables import save_table
 
 logger = logging.getLogger(__name__)
 
-OUTPUT_NAME = 'effects'
-RECORD_FILE = 'effects.json'
 COLUMNS = ['Gene', 'Archetype', 'w1', 'signed_w1', 'w1_trimmed', 'pval',
            'n_gene', 'n_ctrl', 'n_wells']
 
@@ -236,22 +234,25 @@ def gene_effects(weights: pd.DataFrame, channel: str,
     return pd.DataFrame(rows, columns=COLUMNS), skipped
 
 
-def write_channel_effects(config: ArchetypesConfig, channel: str) -> str:
-    """Test *channel*'s weights and write the effects beside them."""
-    path = config.weights_path(channel)
-    removed = sorted({name for names in config.archetypes_to_remove.values()
+def write_channel_effects(archetypes: ArchetypesConfig,
+                          effects: EffectsConfig, channel: str) -> str:
+    """Test *channel*'s weights and write ``<channel>.parquet`` with a
+    ``<channel>.json`` record beside it."""
+    path = archetypes.weights_path(channel)
+    removed = sorted({name for names in archetypes.archetypes_to_remove.values()
                       for name in names if name.rsplit('_', 1)[0] == channel})
     logger.info(f"Reading {path}")
     table, skipped = gene_effects(pd.read_parquet(path), channel, removed,
-                                  config.effects, config.schema)
+                                  effects, effects.schema)
 
-    directory = config.channel_path(channel)
-    output = save_table(table, directory, OUTPUT_NAME)
+    directory = effects.outputs_path
+    output = save_table(table, directory, channel)
     record = {'created': datetime.now().isoformat(timespec='seconds'),
               'chart_version': __version__, 'weights': path,
-              'parameters': asdict(config.effects),
+              'parameters': {key: getattr(effects, key)
+                             for key in ('n_perm', 'trimmed_alpha', 'seed')},
               'removed_archetypes': removed, 'skipped_genes': skipped}
-    record_path = join_path(directory, RECORD_FILE)
+    record_path = join_path(directory, f'{channel}.json')
     if '://' in record_path:
         import fsspec
         opener = fsspec.open
@@ -260,3 +261,41 @@ def write_channel_effects(config: ArchetypesConfig, channel: str) -> str:
     with opener(record_path, 'w') as handle:
         json.dump(record, handle, indent=2)
     return output
+
+
+def run_effects(config: Union[str, Dict[str, Any]],
+                channels: Optional[Sequence[str]] = None,
+                continue_on_error: bool = False) -> Dict[str, Optional[str]]:
+    """Test each channel's archetype weights.
+
+    Args:
+        config: A configuration file or mapping; the channels, weights
+                and removal list come from its archetypes section
+        channels: Channels to run; ``None`` runs every channel in the config
+        continue_on_error: Log and carry on when a channel fails
+
+    Returns:
+        Each channel's effects table, or ``None`` where it failed.
+    """
+    archetypes = load_archetypes_config(config)
+    effects = load_effects_config(config)
+    channels = list(channels) if channels else list(archetypes.channels)
+    if not channels:
+        raise ValueError(f"No channels to run: name them with --channel or "
+                         f"under '{ARCHETYPES_SECTION}.channels'")
+
+    outputs: Dict[str, Optional[str]] = {}
+    for channel in channels:
+        try:
+            outputs[channel] = write_channel_effects(archetypes, effects,
+                                                     channel)
+        except Exception as error:
+            if not continue_on_error:
+                raise
+            outputs[channel] = None
+            logger.error(f"Effects failed for channel {channel}: {error}")
+
+    failed = [channel for channel, output in outputs.items() if output is None]
+    logger.info(f"Effects complete: {len(outputs) - len(failed)}/"
+                f"{len(outputs)} channels succeeded")
+    return outputs

@@ -1,11 +1,11 @@
 """
 The archetype analysis stage.
 
-All but the first and last steps are R scripts, so this module mostly
-does not implement them: it resolves the paths they need from the
-configuration and calls them, once per channel and, where it matters,
-once per gamma/k.knn pair.  The pca step that builds their input and the
-effects step that tests their output are CHART's own, and run in process.
+All but the first step are R scripts, so this module mostly does not
+implement them: it resolves the paths they need from the configuration
+and calls them, once per channel and, where it matters, once per
+gamma/k.knn pair.  The pca step that builds their input is CHART's own,
+and runs in process.
 
 Each script is told which directory to work in through the
 :data:`ENV_DIR` environment variable, and where to leave diagnostics
@@ -44,11 +44,10 @@ SCRIPTS = {
 }
 
 #: Steps CHART runs itself rather than handing to an R script.
-PYTHON_STEPS = ('pca', 'effects')
+PYTHON_STEPS = ('pca',)
 
 #: The steps, in the order they have to run.
-STEPS = ('pca', 'npc', 'metacells', 'evaluate', 'archetypes', 'selectk',
-         'weights', 'effects')
+STEPS = PYTHON_STEPS + tuple(SCRIPTS)
 
 #: Steps that run once per gamma/k.knn pair rather than once per channel.
 PER_PARAMS = ('metacells', 'archetypes')
@@ -130,13 +129,6 @@ def _run_pca(config: ArchetypesConfig, channel: str) -> str:
                              config.channel_path(channel), config.schema)
 
 
-def _run_effects(config: ArchetypesConfig, channel: str) -> str:
-    """Test each gene's effect on the channel's archetype weights."""
-    from .effects import write_channel_effects
-
-    return write_channel_effects(config, channel)
-
-
 def _check_r() -> None:
     """Say what R is missing before the first step, not partway through.
 
@@ -144,11 +136,10 @@ def _check_r() -> None:
     steps before it have spent their hours.
     """
     if not shutil.which('Rscript'):
-        raise RuntimeError("Rscript is not on PATH, and all but the pca and "
-                           "effects steps are R scripts; create the "
-                           "environment described in environment.yml, ask "
-                           "for --steps pca or effects, or run with "
-                           "--dry-run")
+        raise RuntimeError("Rscript is not on PATH, and all but the pca step "
+                           "are R scripts; create the environment described "
+                           "in environment.yml, ask for --steps pca, or run "
+                           "with --dry-run")
 
     # Loaded rather than looked for on disk, because r-supercell and the
     # other compiled packages are built against one R minor version, so a
@@ -252,9 +243,8 @@ def run_archetypes(config: Union[str, Dict[str, Any], ArchetypesConfig],
             continue
 
         if result.step in PYTHON_STEPS:
-            run = {'pca': _run_pca, 'effects': _run_effects}[result.step]
             try:
-                run(config, result.channel)
+                _run_pca(config, result.channel)
             except Exception as error:
                 if not continue_on_error:
                     raise

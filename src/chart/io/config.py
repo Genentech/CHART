@@ -153,11 +153,14 @@ ARCHETYPES_SECTION = 'archetypes'
 _ARCHETYPES_KEYS = frozenset({'outputs_dir', 'reports_dir', 'features_dir',
                               'features_file', 'channels', 'all_channels',
                               'params', 'selected_params', 'npc', 'k',
-                              'archetypes_to_remove', 'effects'})
+                              'archetypes_to_remove'})
+
+EFFECTS_SECTION = 'effects'
 
 _TOP_LEVEL_KEYS = frozenset({'data_output_dir', 'local_output_dir',
                              SECTION_NAME, ALLWELLS_SECTION, GUIDE_SECTION,
-                             SCHEMA_SECTION, ARCHETYPES_SECTION})
+                             SCHEMA_SECTION, ARCHETYPES_SECTION,
+                             EFFECTS_SECTION})
 _SECTION_KEYS = frozenset({'scallops_dir', 'merged_dir', 'filter_dir', 'qc_dir',
                            'filtered_output_dir', 'premerged',
                            'objects_pattern', 'features_pattern',
@@ -437,16 +440,6 @@ class GuideConfig:
         return join_path(self.local_output_dir, self.plot_dir)
 
 
-@dataclass
-class EffectsConfig:
-    """The perturbation-effect test, run on each channel's weights."""
-    n_perm: int = 1000
-    trimmed_alpha: float = 0.02
-    seed: int = 42
-    #: Worker processes; -1 uses every core.
-    n_jobs: int = -1
-
-
 def _read_count(path: str, remedy: str) -> int:
     """The whole number a step left on the first line of *path*."""
     if not exists(path):
@@ -501,7 +494,6 @@ class ArchetypesConfig:
     #: any category names.  Optional, since leaving one out only drops
     #: its rows and can as well be done downstream.
     archetypes_to_remove: Dict[str, List[str]] = field(default_factory=dict)
-    effects: EffectsConfig = field(default_factory=EffectsConfig)
 
     schema: SchemaConfig = field(default_factory=SchemaConfig)
 
@@ -566,6 +558,30 @@ class ArchetypesConfig:
 
 
 @dataclass
+class EffectsConfig:
+    """The perturbation-effect test, run on each channel's weights.
+
+    The weights and the channels are the archetype stage's, so they are
+    read from :class:`ArchetypesConfig` rather than named here.
+    """
+    data_output_dir: str = ''
+    local_output_dir: str = ''
+    outputs_dir: str = 'effects/'
+
+    n_perm: int = 1000
+    trimmed_alpha: float = 0.02
+    seed: int = 42
+    #: Worker processes; -1 uses every core.
+    n_jobs: int = -1
+
+    schema: SchemaConfig = field(default_factory=SchemaConfig)
+
+    @property
+    def outputs_path(self) -> str:
+        return join_path(self.data_output_dir, self.outputs_dir)
+
+
+@dataclass
 class PreprocessingConfig:
     """The three halves of the preprocessing stage.
 
@@ -578,7 +594,8 @@ class PreprocessingConfig:
 
 
 _THRESHOLD_KEYS = frozenset(f.name for f in fields(Thresholds))
-_EFFECTS_KEYS = frozenset(f.name for f in fields(EffectsConfig))
+_EFFECTS_KEYS = frozenset(f.name for f in fields(EffectsConfig)) - {
+    'data_output_dir', 'local_output_dir', 'schema'}
 _WELL_KEYS = frozenset(f.name for f in fields(WellConfig)) - {'well'}
 _SCHEMA_KEYS = frozenset(f.name for f in fields(SchemaConfig))
 
@@ -801,12 +818,6 @@ def load_archetypes_config(
     if 'selected_params' in settings:
         settings['selected_params'] = _archetype_params(
             [settings['selected_params']], 'selected_params')[0]
-    if 'effects' in settings:
-        block = settings['effects'] or {}
-        _warn_unknown(block, _EFFECTS_KEYS, frozenset(),
-                      f'{ARCHETYPES_SECTION}.effects')
-        settings['effects'] = EffectsConfig(
-            **{k: v for k, v in block.items() if k in _EFFECTS_KEYS})
     if 'archetypes_to_remove' in settings:
         removal = settings['archetypes_to_remove'] or {}
         # A category whose names are all commented out reads as None.
@@ -821,6 +832,35 @@ def load_archetypes_config(
                             local_output_dir=config.get('local_output_dir', ''),
                             schema=_build_schema(config),
                             **settings)
+
+
+def load_effects_config(
+        source: Union[str, Dict[str, Any], EffectsConfig]) -> EffectsConfig:
+    """Build an :class:`EffectsConfig` from a file path or a mapping.
+
+    Only the effects section is checked here, for the same reason as
+    :func:`load_allwells_config`.
+    """
+    if isinstance(source, EffectsConfig):
+        return source
+
+    config = load_config_from_file(source) if isinstance(source, str) else source
+    if not isinstance(config, dict):
+        raise ValueError(f"Configuration must be a mapping, got {type(config).__name__}")
+
+    section = config.get(EFFECTS_SECTION)
+    if section is None:
+        section = {}
+    elif not isinstance(section, dict):
+        raise ValueError(f"'{EFFECTS_SECTION}' is present but holds no settings; "
+                         f"remove it or fill it in")
+    else:
+        _warn_unknown(section, _EFFECTS_KEYS, frozenset(), EFFECTS_SECTION)
+
+    return EffectsConfig(data_output_dir=config.get('data_output_dir', ''),
+                         local_output_dir=config.get('local_output_dir', ''),
+                         schema=_build_schema(config),
+                         **{k: v for k, v in section.items() if k in _EFFECTS_KEYS})
 
 
 def load_preprocessing_config(

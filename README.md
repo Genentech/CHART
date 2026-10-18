@@ -14,11 +14,9 @@
 ## Requirements
 
 Most of CHART is Python and arrives with the package. The archetype
-analysis is the exception: every step of it but the first and the last
-is an R script that `chart archetypes` runs through `Rscript`, so that
-stage needs R and eight R packages. The last, `effects`, tests each
-gene's effect on every archetype's weights and writes
-`effects.parquet` in each channel's directory. `environment.yml` describes them:
+analysis is the exception: every step of it but the first is an R script
+that `chart archetypes` runs through `Rscript`, so that stage needs R and
+eight R packages. `environment.yml` describes them:
 
 ```
 mamba env create -f environment.yml
@@ -49,16 +47,21 @@ archetypes:
   all_channels: [DAPI1, TOM20, Golgin97]   # every channel the table holds
 ```
 
-Then run the two stages in order:
+Then run the three stages in order:
 
 ```
 chart preprocessing --config my_screen.yaml --all-wells
 chart archetypes --config my_screen.yaml --all-channels
+chart effects --config my_screen.yaml --all-channels
 ```
+
+`chart effects` tests each gene against the controls on every archetype
+of the weights `chart archetypes` left, and writes one table per channel
+to `effects/` under `data_output_dir`.
 
 Wells are read off the input filenames. Name wells
 individually with `--well` and channels with `--channel`, and use
-`--steps` on either command to run only part of a pipeline.
+`--steps` on the first two to run only part of a pipeline.
 `chart archetypes --dry-run` prints every command the stage would run
 without running any of them.
 

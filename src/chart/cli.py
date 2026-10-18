@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import List, Optional, Sequence
 
 from .archetypes import STEPS as ARCHETYPE_STEPS, run_archetypes
+from .effects import run_effects
 from .io.config import join_path, load_preprocessing_config
 from .combining import AGGREGATION_LEVELS, LEVELS
 from .combining import METHODS as AGGREGATION_METHODS
@@ -65,6 +66,7 @@ def build_parser() -> argparse.ArgumentParser:
                                         metavar='<command>')
     _add_preprocessing_parser(subcommands)
     _add_archetypes_parser(subcommands)
+    _add_effects_parser(subcommands)
     return parser
 
 
@@ -203,6 +205,50 @@ def _archetypes_command(args: argparse.Namespace) -> int:
         return 1
 
     return 1 if any(result.failed for result in results) else 0
+
+
+def _add_effects_parser(subcommands) -> None:
+    """Add the ``chart effects`` subcommand."""
+    parser = subcommands.add_parser(
+        'effects',
+        help='Test each gene against the controls on the archetype weights',
+        description='Test each gene against the controls on every archetype '
+                    "of each channel's weights, as the archetype analysis "
+                    'left them.')
+
+    parser.add_argument('--config', required=True,
+                        help='Path to configuration file (YAML or JSON)')
+
+    target = parser.add_mutually_exclusive_group(required=True)
+    target.add_argument('--channel', nargs='+',
+                        help='Channel(s) to process')
+    target.add_argument('--all-channels', action='store_true',
+                        help='Process every channel named in the configuration')
+
+    parser.add_argument('--continue-on-error', action='store_true',
+                        help='Carry on when a channel fails, instead of stopping')
+    parser.add_argument('--quiet', action='store_true',
+                        help='Log warnings and errors only')
+
+    parser.set_defaults(func=_effects_command)
+
+
+def _effects_command(args: argparse.Namespace) -> int:
+    """Hand over to the perturbation-effect test."""
+    logging.basicConfig(
+        level=logging.WARNING if args.quiet else logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s')
+
+    try:
+        outputs = run_effects(
+            args.config,
+            channels=None if args.all_channels else args.channel,
+            continue_on_error=args.continue_on_error)
+    except Exception as e:
+        logger.error(f"Effects failed: {e}", exc_info=True)
+        return 1
+
+    return 1 if None in outputs.values() else 0
 
 
 def resolve_components(args: argparse.Namespace) -> List[str]:
