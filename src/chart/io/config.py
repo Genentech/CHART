@@ -153,10 +153,14 @@ ARCHETYPES_SECTION = 'archetypes'
 _SAMPLE_SIZE_KEYS = ('coverage_sample_size', 'eval_sample_size',
                      'fit_sample_size')
 
+_CROPS_KEYS = ('image_channels', 'top_cells', 'display_percentiles',
+               'display_ranges')
+
 _ARCHETYPES_KEYS = frozenset({'outputs_dir', 'reports_dir', 'features_dir',
                               'features_file', 'channels', 'all_channels',
                               'params', 'selected_params', 'npc', 'k',
-                              'archetypes_to_remove', *_SAMPLE_SIZE_KEYS})
+                              'archetypes_to_remove', *_SAMPLE_SIZE_KEYS,
+                              *_CROPS_KEYS})
 
 EFFECTS_SECTION = 'effects'
 
@@ -217,6 +221,11 @@ class SchemaConfig:
     #: Where the outlier position plot reads cell coordinates.
     centroid_columns: List[str] = field(
         default_factory=lambda: ['nuclei_centroid-0', 'nuclei_centroid-1'])
+    #: Where the crops step reads each cell's bounding box in the objects
+    #: tables: first row, first column, then one past the last of each.
+    bbox_columns: List[str] = field(
+        default_factory=lambda: ['cell_bbox-0', 'cell_bbox-1',
+                                 'cell_bbox-2', 'cell_bbox-3'])
 
     def rename_map(self) -> Dict[str, str]:
         """Map the caller's column names onto the ones the steps read.
@@ -249,6 +258,11 @@ class WellConfig:
     sbs_feature_dir: str = ''
     dapi_channel_names: Optional[List[str]] = None
     pheno_sbs_dapi_channel: Union[str, int, None] = None
+    #: Zarrs holding the well's cell and nucleus label images, as
+    #: ``labels/<well>-cell`` and ``labels/<well>-nuclei``.  Only the
+    #: archetypes stage's crops step reads them.
+    cell_labels_dir: str = ''
+    nuclei_labels_dir: str = ''
 
     def resolve_pheno_sbs_dapi_channel(self) -> Union[str, int]:
         """Which pheno channel holds the DAPI stain in SBS-registered space."""
@@ -507,6 +521,21 @@ class ArchetypesConfig:
     coverage_sample_size: int = 12000
     eval_sample_size: int = 8000
     fit_sample_size: int = 12000
+    #: Which channel of the registered images holds each stain, counting
+    #: from 0.  By position, because the channel names differ between
+    #: wells.  A channel left out of this gets no crops, with a warning,
+    #: or an error when the crops step is asked for by name.
+    image_channels: Dict[str, int] = field(default_factory=dict)
+    #: How many of each archetype's most heavily weighted cells the crops
+    #: step shows.  The published figures showed 10.
+    top_cells: int = 10
+    #: The percentiles of a well's pixels each stain is shown between, per
+    #: channel.  A channel left out gets 0 and 99.5.
+    display_percentiles: Dict[str, List[float]] = field(default_factory=dict)
+    #: Display ranges fixed per channel and well, used instead of the
+    #: percentiles for those wells.
+    display_ranges: Dict[str, Dict[str, List[float]]] = field(
+        default_factory=dict)
 
     schema: SchemaConfig = field(default_factory=SchemaConfig)
 
@@ -808,6 +837,19 @@ def _archetype_params(params: Any, key: str = 'params') -> List[List[Any]]:
     return pairs
 
 
+def _display_pair(pair: Any, key: str, upper: Optional[float] = None) -> List[float]:
+    """Check a low and a high display value, as the crops step reads them."""
+    if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+        raise ValueError(f"'{ARCHETYPES_SECTION}.{key}' holds a low and a high "
+                         f"value; got {pair!r}")
+    low, high = (_as_float(value, key, ARCHETYPES_SECTION) for value in pair)
+    if not low < high or (upper is not None and (low < 0 or high > upper)):
+        limits = f" between 0 and {upper:g}" if upper is not None else ''
+        raise ValueError(f"'{ARCHETYPES_SECTION}.{key}' needs a low value "
+                         f"below the high one{limits}; got {pair!r}")
+    return [low, high]
+
+
 def load_archetypes_config(
         source: Union[str, Dict[str, Any], ArchetypesConfig]) -> ArchetypesConfig:
     """Build an :class:`ArchetypesConfig` from a file path or a mapping.
@@ -851,6 +893,30 @@ def load_archetypes_config(
                              f"names; got {removal!r}")
         settings['archetypes_to_remove'] = {
             category: list(names or []) for category, names in removal.items()}
+    if 'top_cells' in settings:
+        _as_count(settings['top_cells'], 'top_cells', ARCHETYPES_SECTION)
+    for key in ('image_channels', 'display_percentiles', 'display_ranges'):
+        if key in settings:
+            if not isinstance(settings[key] or {}, dict):
+                raise ValueError(f"'{ARCHETYPES_SECTION}.{key}' is keyed by "
+                                 f"channel; got {settings[key]!r}")
+            settings[key] = dict(settings[key] or {})
+    for channel, index in settings.get('image_channels', {}).items():
+        if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+            raise ValueError(f"'{ARCHETYPES_SECTION}.image_channels' gives the "
+                             f"position of each stain among the image's "
+                             f"channels, counting from 0; got {index!r} for "
+                             f"{channel}")
+    for channel, pair in settings.get('display_percentiles', {}).items():
+        settings['display_percentiles'][channel] = _display_pair(
+            pair, f'display_percentiles.{channel}', upper=100)
+    for channel, wells in settings.get('display_ranges', {}).items():
+        if not isinstance(wells, dict):
+            raise ValueError(f"'{ARCHETYPES_SECTION}.display_ranges.{channel}' "
+                             f"is keyed by well; got {wells!r}")
+        settings['display_ranges'][channel] = {
+            well: _display_pair(pair, f'display_ranges.{channel}.{well}')
+            for well, pair in wells.items()}
     return ArchetypesConfig(data_output_dir=config.get('data_output_dir', ''),
                             local_output_dir=config.get('local_output_dir', ''),
                             schema=_build_schema(config),

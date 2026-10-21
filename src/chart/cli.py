@@ -156,8 +156,10 @@ def _add_archetypes_parser(subcommands) -> None:
         'archetypes',
         help='Run the archetype analysis',
         description='Run the archetype analysis on one channel or all of '
-                    'them. The steps are R scripts, so this resolves the '
-                    'directory each one works in and calls them in order.')
+                    'them. Most steps are R scripts, so this resolves the '
+                    'directory each one works in and calls them in order. '
+                    "The last, crops, draws each archetype's top cells from "
+                    'the images.')
 
     parser.add_argument('--config', required=True,
                         help='Path to configuration file (YAML or JSON)')

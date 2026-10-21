@@ -1,11 +1,12 @@
 """
 The archetype analysis stage.
 
-All but the first step are R scripts, so this module mostly does not
-implement them: it resolves the paths they need from the configuration
-and calls them, once per channel and, where it matters, once per
-gamma/k.knn pair.  The pca step that builds their input is CHART's own,
-and runs in process.
+All but the first and last steps are R scripts, so this module mostly
+does not implement them: it resolves the paths they need from the
+configuration and calls them, once per channel and, where it matters,
+once per gamma/k.knn pair.  The pca step that builds their input is
+CHART's own, as is the crops step that shows each archetype's top cells,
+and both run in process.
 
 Each script is told which directory to work in through the
 :data:`ENV_DIR` environment variable, and where to leave diagnostics
@@ -44,10 +45,10 @@ SCRIPTS = {
 }
 
 #: Steps CHART runs itself rather than handing to an R script.
-PYTHON_STEPS = ('pca',)
+PYTHON_STEPS = ('pca', 'crops')
 
 #: The steps, in the order they have to run.
-STEPS = PYTHON_STEPS + tuple(SCRIPTS)
+STEPS = ('pca', *SCRIPTS, 'crops')
 
 #: Steps that run once per gamma/k.knn pair rather than once per channel.
 PER_PARAMS = ('metacells', 'archetypes')
@@ -129,6 +130,15 @@ def _run_pca(config: ArchetypesConfig, channel: str) -> str:
     return write_channel_pca(config.features_path, channel,
                              config.all_channels,
                              config.channel_path(channel), config.schema)
+
+
+def _run_crops(source: Union[str, Dict[str, Any], ArchetypesConfig],
+               config: ArchetypesConfig, channel: str,
+               requested: bool) -> List[str]:
+    """Show each of the channel's archetypes through its top cells."""
+    from .crops import write_channel_crops
+
+    return write_channel_crops(source, config, channel, requested)
 
 
 def _check_r() -> None:
@@ -222,6 +232,7 @@ def run_archetypes(config: Union[str, Dict[str, Any], ArchetypesConfig],
     Returns:
         One :class:`StepResult` per invocation, in the order planned.
     """
+    source = config
     config = load_archetypes_config(config)
     channels = list(channels) if channels else list(config.channels)
     if not channels:
@@ -246,7 +257,11 @@ def run_archetypes(config: Union[str, Dict[str, Any], ArchetypesConfig],
 
         if result.step in PYTHON_STEPS:
             try:
-                _run_pca(config, result.channel)
+                if result.step == 'pca':
+                    _run_pca(config, result.channel)
+                else:
+                    _run_crops(source, config, result.channel,
+                               'crops' in steps)
             except Exception as error:
                 if not continue_on_error:
                     raise
