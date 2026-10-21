@@ -155,6 +155,16 @@ archetypes:
   # k:
   #   TOM20: 12
 
+  # How many metacells the archetypes step samples.  Each of its repeated
+  # fits takes fit_sample_size, mostly from a spread-out subset of
+  # coverage_sample_size, and every fit is scored on one shared sample of
+  # eval_sample_size.  These are the published run's.  A channel with too
+  # few metacells uses all of them, and the step warns that its fits then
+  # differ only in their random starts.
+  # coverage_sample_size: 12000
+  # eval_sample_size: 8000
+  # fit_sample_size: 12000
+
   # Archetypes 'chart effects' leaves out, as <channel>_ArchetypeN
   # under any category names.  Optional: leaving one out only drops its
   # rows, and changes nothing for the others, so it can as well be done

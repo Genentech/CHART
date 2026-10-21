@@ -161,6 +161,23 @@ def test_without_a_configured_npc_the_scripts_choose_it():
     assert without[1].endswith(f'10 10 {CHANNEL}')
 
 
+def test_the_archetypes_step_is_told_the_published_sample_sizes():
+    line = commands(steps=['archetypes'])[0]
+    assert line.endswith(f'10 10 {CHANNEL} FALSE 12000 8000 12000')
+
+
+def test_configured_sample_sizes_reach_the_archetypes_step():
+    line = commands(steps=['archetypes'], coverage_sample_size=600,
+                    eval_sample_size=400, fit_sample_size=500)[0]
+    assert line.endswith(f'10 10 {CHANNEL} FALSE 600 400 500')
+
+
+def test_a_sample_size_that_is_not_a_count_is_reported():
+    for bad in (0, -5, 1.5, 'many', True):
+        with pytest.raises(ValueError, match='fit_sample_size'):
+            load_archetypes_config(config(fit_sample_size=bad))
+
+
 def test_a_step_needing_pairs_says_so_when_there_are_none():
     with pytest.raises(ValueError, match='archetypes.params'):
         run_archetypes(config(params=[]), channels=[CHANNEL],

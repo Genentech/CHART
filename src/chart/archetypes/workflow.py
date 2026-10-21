@@ -103,7 +103,9 @@ def _arguments(step: str, config: ArchetypesConfig, channel: str,
         arguments = [str(pair[0]), str(pair[1]), channel]
         return arguments + ([str(npc)] if npc is not None else [])
     if step == 'archetypes':
-        return [str(pair[0]), str(pair[1]), channel, 'FALSE']
+        return [str(pair[0]), str(pair[1]), channel, 'FALSE',
+                str(config.coverage_sample_size), str(config.eval_sample_size),
+                str(config.fit_sample_size)]
     if step in SELECTED_PAIR:
         # Which swept pair carries on, and whether K was decided already.
         # Left out, selectk picks it and weights reads what it picked.

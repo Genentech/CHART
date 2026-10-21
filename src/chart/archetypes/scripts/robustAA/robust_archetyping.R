@@ -2,11 +2,10 @@
 # then pass the resulting matrix to run_one_space() (NOT run_one_space_file()).
 #
 # Usage:
-#   Rscript aa_select_one_space_customprep.R --in spaceA.rds --out AA_select_spaceA.rds
+#   Rscript robust_archetyping.R gamma knn channel pw [C_size eval_size fit_size]
 #
-# Optional args:
-#   --kmin 6 --kmax 20 --runs 8 --nrep 10 --fit_size 12000 --eval_size 8000 --C_size 12000
-#   --knn_k 30 --alpha 1.5 --seed 1 --tau 0.3 --fracCfit 0.7 --fracCeval 0.5
+# The three sizes are how many metacells run_one_space() samples; left
+# out, they take its defaults.
 
 # if (!requireNamespace("renv", quietly = TRUE)) install.packages("renv")
 # renv::load(project = "/gstore/data/marioni_group/Carolina/CP2.0/ArchetypeAnalysis/")
@@ -72,6 +71,8 @@ sample_mix <- function(n_total, C_idx, rarity, m, frac_C, alpha, seed) {
   p <- rarity^alpha
   p[!is.finite(p)] <- 0
   p <- p / sum(p)
+  # Without replacement, there are only so many to draw.
+  mR <- min(mR, sum(p > 0))
   idxR <- sample.int(n_total, mR, replace = FALSE, prob = p)
   
   unique(c(idxC, idxR))
@@ -140,6 +141,16 @@ run_one_space <- function(
   Xs <- scale_embed(X)
   n <- nrow(Xs)
   K_grid <- kmin:kmax
+  if (min(C_size, floor(fit_size * frac_C_fit)) >= n) {
+    warning("There are only ", n, " metacells, so every fit uses all of ",
+            "them and the ", R_runs, " runs per K differ only in their ",
+            "random starts. To assess how stable the archetypes are, lower ",
+            "archetypes.coverage_sample_size and archetypes.fit_sample_size ",
+            "in the config, so that each run fits a different subset. The ",
+            "published run set both to about 40% of its metacells, which ",
+            "here would be about ", round(0.4 * n), ".",
+            call. = FALSE, immediate. = TRUE)
+  }
   
   C_idx <- fps_indices(Xs, m = C_size, seed = seed)
   rarity <- knn_rarity(Xs, k = knn_k)
@@ -220,6 +231,9 @@ gamma = as.numeric(args[[1]])
 knn = as.numeric(args[[2]])
 channel = args[[3]]
 pw = as.logical(args[[4]])
+C_size = if (length(args) >= 5) as.numeric(args[[5]]) else 12000
+eval_size = if (length(args) >= 6) as.numeric(args[[6]]) else 8000
+fit_size = if (length(args) >= 7) as.numeric(args[[7]]) else 12000
 
 # Every step of this stage reads and writes inside one directory per
 # channel.  'chart archetypes' sets it; by hand, export it once.  This
@@ -274,7 +288,8 @@ aggregated <- supercell_GE(t(scores[,1:npc]), supercells$membership)
 # whichever ran last decided what the file held.
 rm(pca); gc(FALSE)
 
-res <- run_one_space(t(as.matrix(aggregated)))
+res <- run_one_space(t(as.matrix(aggregated)), C_size = C_size,
+                     eval_size = eval_size, fit_size = fit_size)
 
 if(pw){
   saveRDS(res,paste0(indir,channel,"/archetype_robust_runs_gamma",gamma,

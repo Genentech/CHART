@@ -150,10 +150,13 @@ SCHEMA_SECTION = 'schema'
 
 ARCHETYPES_SECTION = 'archetypes'
 
+_SAMPLE_SIZE_KEYS = ('coverage_sample_size', 'eval_sample_size',
+                     'fit_sample_size')
+
 _ARCHETYPES_KEYS = frozenset({'outputs_dir', 'reports_dir', 'features_dir',
                               'features_file', 'channels', 'all_channels',
                               'params', 'selected_params', 'npc', 'k',
-                              'archetypes_to_remove'})
+                              'archetypes_to_remove', *_SAMPLE_SIZE_KEYS})
 
 EFFECTS_SECTION = 'effects'
 
@@ -494,6 +497,15 @@ class ArchetypesConfig:
     #: any category names.  Optional, since leaving one out only drops
     #: its rows and can as well be done downstream.
     archetypes_to_remove: Dict[str, List[str]] = field(default_factory=dict)
+    #: How many metacells the archetypes step samples.  Each of its
+    #: repeated fits takes ``fit_sample_size``, mostly from a spread-out
+    #: subset of ``coverage_sample_size``, and every fit is scored on one
+    #: shared sample of ``eval_sample_size``.  The defaults are the
+    #: published run's.  A channel with too few metacells uses all of
+    #: them, and its fits then all see the same ones.
+    coverage_sample_size: int = 12000
+    eval_sample_size: int = 8000
+    fit_sample_size: int = 12000
 
     schema: SchemaConfig = field(default_factory=SchemaConfig)
 
@@ -613,6 +625,13 @@ def _as_float(value: Any, key: str, where: str) -> float:
     except (TypeError, ValueError):
         raise ValueError(f"Config key '{key}' in {where} must be a number, "
                          f"got {value!r}") from None
+
+
+def _as_count(value: Any, key: str, where: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"Config key '{key}' in {where} must be a whole "
+                         f"number of at least 1, got {value!r}")
+    return value
 
 
 def _build_thresholds(section: Dict[str, Any], config: Dict[str, Any]) -> Thresholds:
@@ -818,6 +837,9 @@ def load_archetypes_config(
     if 'selected_params' in settings:
         settings['selected_params'] = _archetype_params(
             [settings['selected_params']], 'selected_params')[0]
+    for key in _SAMPLE_SIZE_KEYS:
+        if key in settings:
+            _as_count(settings[key], key, ARCHETYPES_SECTION)
     if 'archetypes_to_remove' in settings:
         removal = settings['archetypes_to_remove'] or {}
         # A category whose names are all commented out reads as None.
