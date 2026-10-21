@@ -1,0 +1,21 @@
+# Python 3.11. Versions below are the ones this pipeline was developed and run
+# against; nearby versions are expected to work.
+#
+#   conda create -n archetype-annot python=3.11
+#   conda activate archetype-annot
+#   pip install -r requirements.txt
+
+langchain==0.3.27
+langchain-openai==0.3.30
+openai==1.99.9
+
+# Step 4 embeds the step 3 summaries to find look-alike archetypes.
+# Pulls in torch; the model (all-MiniLM-L6-v2) downloads on first use.
+sentence-transformers==5.1.2
+scipy==1.16.3
+
+# Image loading / downsampling for the vision calls and the dashboard.
+pillow==11.3.0
+
+# Token counting for the cost report.
+tiktoken==0.11.0

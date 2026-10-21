@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.litellm_env
+
+# run outputs
+archetype_annot_*/
+contrastive_baselines_*/
+archetype_reviews_*/
+dashboards_from_final/
