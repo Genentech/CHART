@@ -16,7 +16,7 @@ import yaml
 from dataclasses import dataclass, field, fields, replace
 from typing import Any, Dict, List, Optional, Union
 
-from .tables import list_dir
+from .tables import exists, list_dir
 
 logger = logging.getLogger(__name__)
 
@@ -150,13 +150,24 @@ SCHEMA_SECTION = 'schema'
 
 ARCHETYPES_SECTION = 'archetypes'
 
+_SAMPLE_SIZE_KEYS = ('coverage_sample_size', 'eval_sample_size',
+                     'fit_sample_size')
+
+_CROPS_KEYS = ('image_channels', 'top_cells', 'display_percentiles',
+               'display_ranges')
+
 _ARCHETYPES_KEYS = frozenset({'outputs_dir', 'reports_dir', 'features_dir',
                               'features_file', 'channels', 'all_channels',
-                              'params', 'selected_params', 'npc', 'k'})
+                              'params', 'selected_params', 'npc', 'k',
+                              'archetypes_to_remove', *_SAMPLE_SIZE_KEYS,
+                              *_CROPS_KEYS})
+
+EFFECTS_SECTION = 'effects'
 
 _TOP_LEVEL_KEYS = frozenset({'data_output_dir', 'local_output_dir',
                              SECTION_NAME, ALLWELLS_SECTION, GUIDE_SECTION,
-                             SCHEMA_SECTION, ARCHETYPES_SECTION})
+                             SCHEMA_SECTION, ARCHETYPES_SECTION,
+                             EFFECTS_SECTION})
 _SECTION_KEYS = frozenset({'scallops_dir', 'merged_dir', 'filter_dir', 'qc_dir',
                            'filtered_output_dir', 'premerged',
                            'objects_pattern', 'features_pattern',
@@ -210,6 +221,11 @@ class SchemaConfig:
     #: Where the outlier position plot reads cell coordinates.
     centroid_columns: List[str] = field(
         default_factory=lambda: ['nuclei_centroid-0', 'nuclei_centroid-1'])
+    #: Where the crops step reads each cell's bounding box in the objects
+    #: tables: first row, first column, then one past the last of each.
+    bbox_columns: List[str] = field(
+        default_factory=lambda: ['cell_bbox-0', 'cell_bbox-1',
+                                 'cell_bbox-2', 'cell_bbox-3'])
 
     def rename_map(self) -> Dict[str, str]:
         """Map the caller's column names onto the ones the steps read.
@@ -242,6 +258,11 @@ class WellConfig:
     sbs_feature_dir: str = ''
     dapi_channel_names: Optional[List[str]] = None
     pheno_sbs_dapi_channel: Union[str, int, None] = None
+    #: Zarrs holding the well's cell and nucleus label images, as
+    #: ``labels/<well>-cell`` and ``labels/<well>-nuclei``.  Only the
+    #: archetypes stage's crops step reads them.
+    cell_labels_dir: str = ''
+    nuclei_labels_dir: str = ''
 
     def resolve_pheno_sbs_dapi_channel(self) -> Union[str, int]:
         """Which pheno channel holds the DAPI stain in SBS-registered space."""
@@ -436,6 +457,19 @@ class GuideConfig:
         return join_path(self.local_output_dir, self.plot_dir)
 
 
+def _read_count(path: str, remedy: str) -> int:
+    """The whole number a step left on the first line of *path*."""
+    if not exists(path):
+        raise FileNotFoundError(f"No {path.rsplit('/', 1)[-1]} at {path}; {remedy}")
+    if '://' in path:
+        import fsspec
+        opener = fsspec.open
+    else:
+        opener = open
+    with opener(path, 'r') as handle:
+        return int(handle.readline())
+
+
 @dataclass
 class ArchetypesConfig:
     """Where the archetype analysis works, and what to run it on.
@@ -473,6 +507,35 @@ class ArchetypesConfig:
     #: How many archetypes, per channel.  A channel left out of this gets
     #: the knee of its recovery curve, which is the usual case.
     k: Dict[str, int] = field(default_factory=dict)
+    #: Archetypes to leave out, as ``<channel>_ArchetypeN`` lists under
+    #: any category names.  Optional: leaving one out drops its rows,
+    #: and also shifts the other archetypes' q-values, since they are
+    #: corrected together.
+    archetypes_to_remove: Dict[str, List[str]] = field(default_factory=dict)
+    #: How many metacells the archetypes step samples.  Each of its
+    #: repeated fits takes ``fit_sample_size``, mostly from a spread-out
+    #: subset of ``coverage_sample_size``, and every fit is scored on one
+    #: shared sample of ``eval_sample_size``.  The defaults are the
+    #: published run's.  A channel with too few metacells uses all of
+    #: them, and its fits then all see the same ones.
+    coverage_sample_size: int = 12000
+    eval_sample_size: int = 8000
+    fit_sample_size: int = 12000
+    #: Which channel of the registered images holds each stain, counting
+    #: from 0.  By position, because the channel names differ between
+    #: wells.  A channel left out of this gets no crops, with a warning,
+    #: or an error when the crops step is asked for by name.
+    image_channels: Dict[str, int] = field(default_factory=dict)
+    #: How many of each archetype's most heavily weighted cells the crops
+    #: step shows.  The published figures showed 10.
+    top_cells: int = 10
+    #: The percentiles of a well's pixels each stain is shown between, per
+    #: channel.  A channel left out gets 0 and 99.5.
+    display_percentiles: Dict[str, List[float]] = field(default_factory=dict)
+    #: Display ranges fixed per channel and well, used instead of the
+    #: percentiles for those wells.
+    display_ranges: Dict[str, Dict[str, List[float]]] = field(
+        default_factory=dict)
 
     schema: SchemaConfig = field(default_factory=SchemaConfig)
 
@@ -508,6 +571,57 @@ class ArchetypesConfig:
         """Where *channel*'s diagnostics go, for people rather than steps."""
         return join_path(self.reports_path, channel)
 
+    def weights_path(self, channel: str) -> str:
+        """The table the weights step wrote for *channel*.
+
+        Named the way the step names it rather than found by listing the
+        directory, where a run with an earlier K or npc leaves a file that
+        fits as well.
+        """
+        directory = self.channel_path(channel)
+        k = self.k.get(channel)
+        if k is None:
+            k = _read_count(join_path(directory, 'k.txt'),
+                            f"run the selectk step or set "
+                            f"'{ARCHETYPES_SECTION}.k' for {channel}")
+        npc = _read_count(join_path(directory, 'npc.txt'), "run the npc step")
+        if self.npc.get(channel, npc) != npc:
+            raise ValueError(
+                f"'{ARCHETYPES_SECTION}.npc' gives {self.npc[channel]} for "
+                f"{channel} but its npc.txt holds {npc}, so the weights were "
+                f"built with another npc; rerun from the npc step")
+        gamma, knn = self.selected
+        path = join_path(directory, f'robust_archweights-{channel}_k{k}_gamma'
+                                    f'{gamma}_knn{knn}_npc{npc}.parquet')
+        if not exists(path):
+            raise FileNotFoundError(f"No archetype weights for {channel} at "
+                                    f"{path}; run the weights step")
+        return path
+
+
+@dataclass
+class EffectsConfig:
+    """The perturbation-effect test, run on each channel's weights.
+
+    The weights and the channels are the archetype stage's, so they are
+    read from :class:`ArchetypesConfig` rather than named here.
+    """
+    data_output_dir: str = ''
+    local_output_dir: str = ''
+    outputs_dir: str = 'effects/'
+
+    n_perm: int = 1000
+    trimmed_alpha: float = 0.02
+    seed: int = 42
+    #: Worker processes; -1 uses every core.
+    n_jobs: int = -1
+
+    schema: SchemaConfig = field(default_factory=SchemaConfig)
+
+    @property
+    def outputs_path(self) -> str:
+        return join_path(self.data_output_dir, self.outputs_dir)
+
 
 @dataclass
 class PreprocessingConfig:
@@ -522,6 +636,8 @@ class PreprocessingConfig:
 
 
 _THRESHOLD_KEYS = frozenset(f.name for f in fields(Thresholds))
+_EFFECTS_KEYS = frozenset(f.name for f in fields(EffectsConfig)) - {
+    'data_output_dir', 'local_output_dir', 'schema'}
 _WELL_KEYS = frozenset(f.name for f in fields(WellConfig)) - {'well'}
 _SCHEMA_KEYS = frozenset(f.name for f in fields(SchemaConfig))
 
@@ -539,6 +655,13 @@ def _as_float(value: Any, key: str, where: str) -> float:
     except (TypeError, ValueError):
         raise ValueError(f"Config key '{key}' in {where} must be a number, "
                          f"got {value!r}") from None
+
+
+def _as_count(value: Any, key: str, where: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"Config key '{key}' in {where} must be a whole "
+                         f"number of at least 1, got {value!r}")
+    return value
 
 
 def _build_thresholds(section: Dict[str, Any], config: Dict[str, Any]) -> Thresholds:
@@ -714,6 +837,19 @@ def _archetype_params(params: Any, key: str = 'params') -> List[List[Any]]:
     return pairs
 
 
+def _display_pair(pair: Any, key: str, upper: Optional[float] = None) -> List[float]:
+    """Check a low and a high display value, as the crops step reads them."""
+    if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+        raise ValueError(f"'{ARCHETYPES_SECTION}.{key}' holds a low and a high "
+                         f"value; got {pair!r}")
+    low, high = (_as_float(value, key, ARCHETYPES_SECTION) for value in pair)
+    if not low < high or (upper is not None and (low < 0 or high > upper)):
+        limits = f" between 0 and {upper:g}" if upper is not None else ''
+        raise ValueError(f"'{ARCHETYPES_SECTION}.{key}' needs a low value "
+                         f"below the high one{limits}; got {pair!r}")
+    return [low, high]
+
+
 def load_archetypes_config(
         source: Union[str, Dict[str, Any], ArchetypesConfig]) -> ArchetypesConfig:
     """Build an :class:`ArchetypesConfig` from a file path or a mapping.
@@ -744,10 +880,76 @@ def load_archetypes_config(
     if 'selected_params' in settings:
         settings['selected_params'] = _archetype_params(
             [settings['selected_params']], 'selected_params')[0]
+    for key in _SAMPLE_SIZE_KEYS:
+        if key in settings:
+            _as_count(settings[key], key, ARCHETYPES_SECTION)
+    if 'archetypes_to_remove' in settings:
+        removal = settings['archetypes_to_remove'] or {}
+        # A category whose names are all commented out reads as None.
+        if not isinstance(removal, dict) or not all(
+                isinstance(names, (list, type(None))) for names in removal.values()):
+            raise ValueError(f"'{ARCHETYPES_SECTION}.archetypes_to_remove' "
+                             f"holds lists of archetype names under category "
+                             f"names; got {removal!r}")
+        settings['archetypes_to_remove'] = {
+            category: list(names or []) for category, names in removal.items()}
+    if 'top_cells' in settings:
+        _as_count(settings['top_cells'], 'top_cells', ARCHETYPES_SECTION)
+    for key in ('image_channels', 'display_percentiles', 'display_ranges'):
+        if key in settings:
+            if not isinstance(settings[key] or {}, dict):
+                raise ValueError(f"'{ARCHETYPES_SECTION}.{key}' is keyed by "
+                                 f"channel; got {settings[key]!r}")
+            settings[key] = dict(settings[key] or {})
+    for channel, index in settings.get('image_channels', {}).items():
+        if isinstance(index, bool) or not isinstance(index, int) or index < 0:
+            raise ValueError(f"'{ARCHETYPES_SECTION}.image_channels' gives the "
+                             f"position of each stain among the image's "
+                             f"channels, counting from 0; got {index!r} for "
+                             f"{channel}")
+    for channel, pair in settings.get('display_percentiles', {}).items():
+        settings['display_percentiles'][channel] = _display_pair(
+            pair, f'display_percentiles.{channel}', upper=100)
+    for channel, wells in settings.get('display_ranges', {}).items():
+        if not isinstance(wells, dict):
+            raise ValueError(f"'{ARCHETYPES_SECTION}.display_ranges.{channel}' "
+                             f"is keyed by well; got {wells!r}")
+        settings['display_ranges'][channel] = {
+            well: _display_pair(pair, f'display_ranges.{channel}.{well}')
+            for well, pair in wells.items()}
     return ArchetypesConfig(data_output_dir=config.get('data_output_dir', ''),
                             local_output_dir=config.get('local_output_dir', ''),
                             schema=_build_schema(config),
                             **settings)
+
+
+def load_effects_config(
+        source: Union[str, Dict[str, Any], EffectsConfig]) -> EffectsConfig:
+    """Build an :class:`EffectsConfig` from a file path or a mapping.
+
+    Only the effects section is checked here, for the same reason as
+    :func:`load_allwells_config`.
+    """
+    if isinstance(source, EffectsConfig):
+        return source
+
+    config = load_config_from_file(source) if isinstance(source, str) else source
+    if not isinstance(config, dict):
+        raise ValueError(f"Configuration must be a mapping, got {type(config).__name__}")
+
+    section = config.get(EFFECTS_SECTION)
+    if section is None:
+        section = {}
+    elif not isinstance(section, dict):
+        raise ValueError(f"'{EFFECTS_SECTION}' is present but holds no settings; "
+                         f"remove it or fill it in")
+    else:
+        _warn_unknown(section, _EFFECTS_KEYS, frozenset(), EFFECTS_SECTION)
+
+    return EffectsConfig(data_output_dir=config.get('data_output_dir', ''),
+                         local_output_dir=config.get('local_output_dir', ''),
+                         schema=_build_schema(config),
+                         **{k: v for k, v in section.items() if k in _EFFECTS_KEYS})
 
 
 def load_preprocessing_config(

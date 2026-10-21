@@ -40,6 +40,10 @@ schema:
   # Where the outlier position plot reads cell coordinates, y then x.
   centroid_columns: [nuclei_centroid-0, nuclei_centroid-1]
 
+  # Where the archetypes crops step reads each cell's bounding box in the
+  # objects tables: first row, first column, then one past the last of each.
+  bbox_columns: [cell_bbox-0, cell_bbox-1, cell_bbox-2, cell_bbox-3]
+
   # The well is deliberately absent: it comes from the well being
   # processed, not from a column.  See objects_pattern below.
 
@@ -73,14 +77,18 @@ preprocessing_bywell:
   # location, centermass, to_origin, _x, _y and orientation.
   # exclude_patterns: [_Location_, _Number_Object_Number]
 
-  # Image directories, which only the QC step reads.  Leave this out and
-  # the wells come from the input filenames instead, which is all the
-  # steps up to normalisation need.  'global' supplies the defaults for
-  # every well, and a well may override any of them.
+  # Image directories, which only the QC step and the archetypes crops
+  # step read.  Leave this out and the wells come from the input filenames
+  # instead, which is all the steps up to normalisation need.  'global'
+  # supplies the defaults for every well, and a well may override any of
+  # them.  The crops step reads pheno_dir and the two label zarrs, which
+  # hold labels/<well>-cell and labels/<well>-nuclei.
   # global:
   #   sbs_dir: /path/to/sbs
   #   sbs_feature_dir: /path/to/sbs/features
   #   dapi_channel_names: [DAPI, GFP, DAPI]
+  #   cell_labels_dir: /path/to/cell-seg.zarr
+  #   nuclei_labels_dir: /path/to/nuclei-seg.zarr
   # wells:
   #   A1:
   #     pheno_dir: /path/to/pheno/A1
@@ -154,3 +162,56 @@ archetypes:
   # the curve the selectk step leaves under reports_dir.
   # k:
   #   TOM20: 12
+
+  # How many metacells the archetypes step samples.  Each of its repeated
+  # fits takes fit_sample_size, mostly from a spread-out subset of
+  # coverage_sample_size, and every fit is scored on one shared sample of
+  # eval_sample_size.  These are the published run's.  A channel with too
+  # few metacells uses all of them, and the step warns that its fits then
+  # differ only in their random starts.
+  # coverage_sample_size: 12000
+  # eval_sample_size: 8000
+  # fit_sample_size: 12000
+
+  # Archetypes 'chart effects' leaves out, as <channel>_ArchetypeN
+  # under any category names.  Optional: leaving one out drops its rows,
+  # and also shifts the other archetypes' q-values, since they are
+  # corrected together.  A channel with none listed gets a warning.
+  # archetypes_to_remove:
+  #   staining_artifacts: [TOM20_Archetype4]
+  #   seg_err: [TOM20_Archetype1]
+
+  # The crops step, last of all, draws each archetype's most heavily
+  # weighted cells from the images, in rows of five, under
+  # reports_dir/<channel>/crops/.  It reads the image locations under
+  # preprocessing_bywell and the bounding boxes from the across-wells
+  # objects table.  image_channels gives each stain's position among the
+  # image's channels, counting from 0; a channel it does not list gets a
+  # warning and no crops, or an error under --steps crops.  Each well's
+  # display range runs between two
+  # percentiles of its pixels, 0 and 99.5 unless display_percentiles says
+  # otherwise; display_ranges fixes it for particular wells instead.
+  # image_channels:
+  #   TOM20: 8
+  #   Golgin97: 9
+  # top_cells: 10
+  # display_percentiles:
+  #   TOM20: [0, 99.9]
+  # display_ranges:
+  #   TOM20:
+  #     A1: [105, 4000]
+
+
+# Read by 'chart effects', which runs on the weights the archetypes stage
+# left for each of its channels.  It tests each gene against the control
+# cells of every well the gene appears in, pooled, with a p-value per
+# archetype from shuffling the labels within each well, and writes
+# <channel>.parquet and <channel>.json under data_output_dir/outputs_dir/.
+# 1000 permutations is what the published run used.  n_jobs -1 uses every
+# core.
+effects:
+  outputs_dir: effects/
+  n_perm: 1000
+  trimmed_alpha: 0.02
+  seed: 42
+  n_jobs: -1

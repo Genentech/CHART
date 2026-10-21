@@ -14,9 +14,9 @@
 ## Requirements
 
 Most of CHART is Python and arrives with the package. The archetype
-analysis is the exception: every step of it but the first is an R script
-that `chart archetypes` runs through `Rscript`, so that stage needs R and
-eight R packages. `environment.yml` describes them:
+analysis is the exception: every step of it but the first and last is an
+R script that `chart archetypes` runs through `Rscript`, so that stage
+needs R and eight R packages. `environment.yml` describes them:
 
 ```
 mamba env create -f environment.yml
@@ -47,16 +47,32 @@ archetypes:
   all_channels: [DAPI1, TOM20, Golgin97]   # every channel the table holds
 ```
 
-Then run the two stages in order:
+Then run the three stages in order:
 
 ```
 chart preprocessing --config my_screen.yaml --all-wells
 chart archetypes --config my_screen.yaml --all-channels
+chart effects --config my_screen.yaml --all-channels
 ```
+
+`chart effects` tests each gene against the controls on every archetype
+of the weights `chart archetypes` left, and writes one table per channel
+to `effects/` under `data_output_dir`. Once every channel in
+`archetypes.channels` has its table, it corrects all their p-values
+together and writes them, with q-values, to `effects/pooled.parquet`.
+
+The last step of `chart archetypes`, `crops`, draws each archetype's most
+heavily weighted cells from the images, five to a PNG, under
+`archetypes/<channel>/crops/` in `local_output_dir`. It reads the images
+through scallops, from the locations under `preprocessing_bywell`. A
+channel that `archetypes.image_channels` does not list, or a machine
+without scallops, gets a warning and no crops, or an error if the step
+was asked for with `--steps crops`; `example_config.yaml` lists its
+settings.
 
 Wells are read off the input filenames. Name wells
 individually with `--well` and channels with `--channel`, and use
-`--steps` on either command to run only part of a pipeline.
+`--steps` on the first two to run only part of a pipeline.
 `chart archetypes --dry-run` prints every command the stage would run
 without running any of them.
 
