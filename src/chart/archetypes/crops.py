@@ -74,6 +74,23 @@ def top_cells(weights: pd.DataFrame, objects: pd.DataFrame, n: int,
     missing = [name for name in INDEX_COLUMNS if name not in weights.columns]
     if missing:
         raise ValueError(f"The weights have no {' or '.join(missing)} column")
+
+    ranked = []
+    for column in [c for c in weights.columns if c not in INDEX_COLUMNS]:
+        top = weights.nlargest(n, column)
+        ranked.append(pd.DataFrame({
+            'Archetype': column,
+            'Rank': np.arange(1, len(top) + 1),
+            'Weight': top[column].to_numpy(),
+            **{name: top[name].to_numpy() for name in INDEX_COLUMNS}}))
+    return with_boxes(pd.concat(ranked, ignore_index=True), objects,
+                      bbox_columns)
+
+
+def with_boxes(cells: pd.DataFrame, objects: pd.DataFrame,
+               bbox_columns: Sequence[str]) -> pd.DataFrame:
+    """*cells*, which has ``Well`` and ``Label`` columns, with each cell's
+    bounding box from the objects table."""
     missing = [name for name in bbox_columns if name not in objects.columns]
     if missing:
         raise ValueError(f"The objects table has no {', '.join(missing)} "
@@ -84,16 +101,8 @@ def top_cells(weights: pd.DataFrame, objects: pd.DataFrame, n: int,
                           'Label': objects.index.get_level_values('Label'),
                           **{name: objects[name].to_numpy()
                              for name in bbox_columns}})
-    ranked = []
-    for column in [c for c in weights.columns if c not in INDEX_COLUMNS]:
-        top = weights.nlargest(n, column)
-        ranked.append(pd.DataFrame({
-            'Archetype': column,
-            'Rank': np.arange(1, len(top) + 1),
-            'Weight': top[column].to_numpy(),
-            **{name: top[name].to_numpy() for name in INDEX_COLUMNS}}))
-    cells = pd.concat(ranked, ignore_index=True).merge(
-        boxes, on=['Well', 'Label'], how='left', validate='many_to_one')
+    cells = cells.merge(boxes, on=['Well', 'Label'], how='left',
+                        validate='many_to_one')
 
     unboxed = cells[list(bbox_columns)].isna().any(axis=1)
     if unboxed.any():

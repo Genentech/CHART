@@ -12,6 +12,8 @@ license-files = ["LICENSE.txt"]
 authors = [{ name = "Genentech, Inc." }]
 dynamic = ["version"]
 dependencies = [
+    "igraph",
+    "leidenalg",
     "matplotlib",
     "numba",
     "numpy",

@@ -164,10 +164,12 @@ _ARCHETYPES_KEYS = frozenset({'outputs_dir', 'reports_dir', 'features_dir',
 
 EFFECTS_SECTION = 'effects'
 
+PROGRAMS_SECTION = 'programs'
+
 _TOP_LEVEL_KEYS = frozenset({'data_output_dir', 'local_output_dir',
                              SECTION_NAME, ALLWELLS_SECTION, GUIDE_SECTION,
                              SCHEMA_SECTION, ARCHETYPES_SECTION,
-                             EFFECTS_SECTION})
+                             EFFECTS_SECTION, PROGRAMS_SECTION})
 _SECTION_KEYS = frozenset({'scallops_dir', 'merged_dir', 'filter_dir', 'qc_dir',
                            'filtered_output_dir', 'premerged',
                            'objects_pattern', 'features_pattern',
@@ -624,6 +626,28 @@ class EffectsConfig:
 
 
 @dataclass
+class ProgramsConfig:
+    """The programs: archetypes that move together across genes, the
+    genes' modules, and each cell's scores.
+
+    The effects and the weights are read from :class:`EffectsConfig` and
+    :class:`ArchetypesConfig` rather than named here.
+    """
+    data_output_dir: str = ''
+    local_output_dir: str = ''
+    outputs_dir: str = 'programs/'
+
+    k: int = 18
+    qval_threshold: float = 0.01
+    n_modules: int = 25
+    seed: int = 42
+
+    @property
+    def outputs_path(self) -> str:
+        return join_path(self.data_output_dir, self.outputs_dir)
+
+
+@dataclass
 class PreprocessingConfig:
     """The three halves of the preprocessing stage.
 
@@ -638,6 +662,8 @@ class PreprocessingConfig:
 _THRESHOLD_KEYS = frozenset(f.name for f in fields(Thresholds))
 _EFFECTS_KEYS = frozenset(f.name for f in fields(EffectsConfig)) - {
     'data_output_dir', 'local_output_dir', 'schema'}
+_PROGRAMS_KEYS = frozenset(f.name for f in fields(ProgramsConfig)) - {
+    'data_output_dir', 'local_output_dir'}
 _WELL_KEYS = frozenset(f.name for f in fields(WellConfig)) - {'well'}
 _SCHEMA_KEYS = frozenset(f.name for f in fields(SchemaConfig))
 
@@ -950,6 +976,34 @@ def load_effects_config(
                          local_output_dir=config.get('local_output_dir', ''),
                          schema=_build_schema(config),
                          **{k: v for k, v in section.items() if k in _EFFECTS_KEYS})
+
+
+def load_programs_config(
+        source: Union[str, Dict[str, Any], ProgramsConfig]) -> ProgramsConfig:
+    """Build a :class:`ProgramsConfig` from a file path or a mapping.
+
+    Only the programs section is checked here, for the same reason as
+    :func:`load_allwells_config`.
+    """
+    if isinstance(source, ProgramsConfig):
+        return source
+
+    config = load_config_from_file(source) if isinstance(source, str) else source
+    if not isinstance(config, dict):
+        raise ValueError(f"Configuration must be a mapping, got {type(config).__name__}")
+
+    section = config.get(PROGRAMS_SECTION)
+    if section is None:
+        section = {}
+    elif not isinstance(section, dict):
+        raise ValueError(f"'{PROGRAMS_SECTION}' is present but holds no settings; "
+                         f"remove it or fill it in")
+    else:
+        _warn_unknown(section, _PROGRAMS_KEYS, frozenset(), PROGRAMS_SECTION)
+
+    return ProgramsConfig(data_output_dir=config.get('data_output_dir', ''),
+                          local_output_dir=config.get('local_output_dir', ''),
+                          **{k: v for k, v in section.items() if k in _PROGRAMS_KEYS})
 
 
 def load_preprocessing_config(
