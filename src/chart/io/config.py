@@ -494,8 +494,9 @@ class ArchetypesConfig:
     #: the knee of its recovery curve, which is the usual case.
     k: Dict[str, int] = field(default_factory=dict)
     #: Archetypes to leave out, as ``<channel>_ArchetypeN`` lists under
-    #: any category names.  Optional, since leaving one out only drops
-    #: its rows and can as well be done downstream.
+    #: any category names.  Optional: leaving one out drops its rows,
+    #: and also shifts the other archetypes' q-values, since they are
+    #: corrected together.
     archetypes_to_remove: Dict[str, List[str]] = field(default_factory=dict)
     #: How many metacells the archetypes step samples.  Each of its
     #: repeated fits takes ``fit_sample_size``, mostly from a spread-out

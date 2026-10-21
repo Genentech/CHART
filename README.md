@@ -57,7 +57,9 @@ chart effects --config my_screen.yaml --all-channels
 
 `chart effects` tests each gene against the controls on every archetype
 of the weights `chart archetypes` left, and writes one table per channel
-to `effects/` under `data_output_dir`.
+to `effects/` under `data_output_dir`. Once every channel in
+`archetypes.channels` has its table, it corrects all their p-values
+together and writes them, with q-values, to `effects/pooled.parquet`.
 
 Wells are read off the input filenames. Name wells
 individually with `--well` and channels with `--channel`, and use

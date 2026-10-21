@@ -2,6 +2,7 @@
 Perturbation effects: how far each gene moves each archetype's weights
 away from the controls.  The distance pools the control cells of every
 well the gene appears in; the p-value shuffles the labels within each well.
+Once every channel has its table, their p-values are corrected together.
 """
 
 import json
@@ -20,12 +21,14 @@ from ..dimred.pca import NoControlsError, control_mask
 from ..io.config import (ARCHETYPES_SECTION, ArchetypesConfig, EffectsConfig,
                          SchemaConfig, join_path, load_archetypes_config,
                          load_effects_config)
-from ..io.tables import save_table
+from ..io.tables import load_table, save_table, table_exists, table_path
 
 logger = logging.getLogger(__name__)
 
 COLUMNS = ['Gene', 'Archetype', 'w1', 'signed_w1', 'w1_trimmed', 'pval',
            'n_gene', 'n_ctrl', 'n_wells']
+
+POOLED = 'pooled'
 
 
 def dirichlet_smooth(W: np.ndarray, alpha: float = 1e-6) -> np.ndarray:
@@ -126,6 +129,29 @@ def w1_with_stratified_permutation(values: np.ndarray, group: np.ndarray,
             ge += 1
     out["pval"] = float((ge + 1) / (n_perm + 1))
     return out
+
+
+def bh_qvalues(pvals: np.ndarray) -> np.ndarray:
+    """Benjamini-Hochberg q-values, NaN wherever the p-value is not finite."""
+    p = pvals.ravel().astype(float)
+    finite = np.isfinite(p)
+    m = finite.sum()
+    q = np.full_like(p, np.nan, dtype=float)
+
+    if m == 0:
+        return q.reshape(pvals.shape)
+
+    order = np.argsort(p[finite])
+    ranked = p[finite][order]
+    mult = m / np.arange(1, m + 1)
+    q_sorted = np.minimum.accumulate((ranked * mult)[::-1])[::-1]
+    q_vals = np.minimum(q_sorted, 1.0)
+
+    tmp = np.empty_like(q_vals)
+    tmp[order] = q_vals
+    q[finite] = tmp
+
+    return q.reshape(pvals.shape)
 
 
 _shared: Dict[str, np.ndarray] = {}
@@ -241,6 +267,12 @@ def write_channel_effects(archetypes: ArchetypesConfig,
     path = archetypes.weights_path(channel)
     removed = sorted({name for names in archetypes.archetypes_to_remove.values()
                       for name in names if name.rsplit('_', 1)[0] == channel})
+    if not removed:
+        logger.warning(f"Nothing in '{ARCHETYPES_SECTION}.archetypes_to_remove' "
+                       f"belongs to {channel}, so all of its archetypes are "
+                       f"tested, including any that are segmentation errors "
+                       f"or staining artefacts. Those are best listed there "
+                       f"before running effects.")
     logger.info(f"Reading {path}")
     table, skipped = gene_effects(pd.read_parquet(path), channel, removed,
                                   effects, effects.schema)
@@ -252,21 +284,73 @@ def write_channel_effects(archetypes: ArchetypesConfig,
               'parameters': {key: getattr(effects, key)
                              for key in ('n_perm', 'trimmed_alpha', 'seed')},
               'removed_archetypes': removed, 'skipped_genes': skipped}
-    record_path = join_path(directory, f'{channel}.json')
-    if '://' in record_path:
+    _write_record(join_path(directory, f'{channel}.json'), record)
+    return output
+
+
+def _write_record(path: str, record: Dict[str, Any]) -> None:
+    if '://' in path:
         import fsspec
         opener = fsspec.open
     else:
         opener = open
-    with opener(record_path, 'w') as handle:
+    with opener(path, 'w') as handle:
         json.dump(record, handle, indent=2)
+
+
+def pool_effects(archetypes: ArchetypesConfig, effects: EffectsConfig,
+                 failed: Sequence[str] = ()) -> Optional[str]:
+    """Correct the p-values of every channel's table together, and write
+    them with their q-values to ``pooled.parquet``, with a ``pooled.json``
+    record beside it.
+
+    A q-value depends on every test corrected alongside it, so nothing is
+    written unless every channel in the config has a table from this run
+    or an earlier one.
+
+    Args:
+        failed: Channels that failed in this run, so that any table of
+                theirs on disk is an earlier run's
+
+    Returns:
+        The pooled table, or ``None`` if it was not written.
+    """
+    directory = effects.outputs_path
+    channels = list(archetypes.channels)
+    stale = [channel for channel in channels if channel in failed]
+    missing = [channel for channel in channels if channel not in stale
+               and not table_exists(directory, channel)]
+    if stale or missing:
+        if stale:
+            reason = (f"{', '.join(stale)} failed in this run, and any table "
+                      f"of theirs is from an earlier one")
+        else:
+            reason = (f"there is no effects table yet for "
+                      f"{', '.join(missing)}, and the q-values are pooled "
+                      f"only once every channel in "
+                      f"'{ARCHETYPES_SECTION}.channels' has one")
+        earlier = (f" The {POOLED}.parquet already in {directory} is from an "
+                   f"earlier run." if table_exists(directory, POOLED) else '')
+        logger.warning(f"Not pooling the q-values: {reason}.{earlier}")
+        return None
+
+    pooled = pd.concat([load_table(directory, channel) for channel in channels],
+                       ignore_index=True)
+    pooled['qval'] = bh_qvalues(pooled['pval'].to_numpy())
+    output = save_table(pooled, directory, POOLED)
+    record = {'created': datetime.now().isoformat(timespec='seconds'),
+              'chart_version': __version__, 'method': 'Benjamini-Hochberg',
+              'tests': len(pooled),
+              'tables': [table_path(directory, channel) for channel in channels]}
+    _write_record(join_path(directory, f'{POOLED}.json'), record)
     return output
 
 
 def run_effects(config: Union[str, Dict[str, Any]],
                 channels: Optional[Sequence[str]] = None,
                 continue_on_error: bool = False) -> Dict[str, Optional[str]]:
-    """Test each channel's archetype weights.
+    """Test each channel's archetype weights, then correct every channel's
+    p-values together.
 
     Args:
         config: A configuration file or mapping; the channels, weights
@@ -298,4 +382,11 @@ def run_effects(config: Union[str, Dict[str, Any]],
     failed = [channel for channel, output in outputs.items() if output is None]
     logger.info(f"Effects complete: {len(outputs) - len(failed)}/"
                 f"{len(outputs)} channels succeeded")
+    unlisted = [channel for channel in outputs
+                if channel not in archetypes.channels]
+    if unlisted:
+        logger.warning(f"The pooled q-values cover only the channels in "
+                       f"'{ARCHETYPES_SECTION}.channels', which does not list "
+                       f"{', '.join(unlisted)}.")
+    pool_effects(archetypes, effects, failed)
     return outputs

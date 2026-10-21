@@ -166,9 +166,9 @@ archetypes:
   # fit_sample_size: 12000
 
   # Archetypes 'chart effects' leaves out, as <channel>_ArchetypeN
-  # under any category names.  Optional: leaving one out only drops its
-  # rows, and changes nothing for the others, so it can as well be done
-  # downstream.
+  # under any category names.  Optional: leaving one out drops its rows,
+  # and also shifts the other archetypes' q-values, since they are
+  # corrected together.  A channel with none listed gets a warning.
   # archetypes_to_remove:
   #   staining_artifacts: [TOM20_Archetype4]
   #   seg_err: [TOM20_Archetype1]

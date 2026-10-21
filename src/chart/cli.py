@@ -214,7 +214,8 @@ def _add_effects_parser(subcommands) -> None:
         help='Test each gene against the controls on the archetype weights',
         description='Test each gene against the controls on every archetype '
                     "of each channel's weights, as the archetype analysis "
-                    'left them.')
+                    'left them.  Once every channel has been tested, their '
+                    'p-values are corrected together into effects/pooled.parquet.')
 
     parser.add_argument('--config', required=True,
                         help='Path to configuration file (YAML or JSON)')
