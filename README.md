@@ -24,6 +24,16 @@ conda activate chart-r
 Rscript -e 'install.packages("archetypes", repos="https://cloud.r-project.org")'
 ```
 
+The archetype annotation is optional. It needs two more packages and a key
+for the language model, read from the environment:
+
+```
+pip install ".[annotation]"
+export OPENAI_API_KEY="sk-..."
+```
+
+`src/chart/annotation/llm.py` lists the gateway and Azure alternatives.
+
 ## Quickstart
 
 Install the package, plus the environment above if you want the archetype
@@ -52,6 +62,7 @@ Then run the three stages in order:
 ```
 chart preprocessing --config my_screen.yaml --all-wells
 chart archetypes --config my_screen.yaml --all-channels
+chart annotation --config my_screen.yaml --all-channels   # optional
 chart effects --config my_screen.yaml --all-channels
 ```
 
@@ -70,9 +81,14 @@ without scallops, gets a warning and no crops, or an error if the step
 was asked for with `--steps crops`; `example_config.yaml` lists its
 settings.
 
+`chart annotation` describes each archetype from those crops with a
+language model, leaving out the archetypes `archetypes_to_remove` lists,
+and writes the reports and a dashboard to `annotation/<channel>/` under
+`local_output_dir`. Nothing downstream reads them.
+
 Wells are read off the input filenames. Name wells
 individually with `--well` and channels with `--channel`, and use
-`--steps` on the first two to run only part of a pipeline.
+`--steps` on the first three to run only part of a pipeline.
 `chart archetypes --dry-run` prints every command the stage would run
 without running any of them.
 

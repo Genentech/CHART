@@ -1,4 +1,3 @@
-# promptlib.py
 """Every prompt the pipeline sends, in one place.
 
 Steps 1, 2 and 4 are purely observational - no biology, no marker priors. The

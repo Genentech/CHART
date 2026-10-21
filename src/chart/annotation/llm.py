@@ -1,4 +1,3 @@
-# llm_core.py
 """Model plumbing for the archetype annotation pipeline.
 
 Two providers are supported and the pipeline runs identically on either:
@@ -7,6 +6,7 @@ Two providers are supported and the pipeline runs identically on either:
                export LITELLM_API_KEY="sk-..."
                export LITELLM_BASE_URL="https://<gateway-host>"   # '/v1' appended if absent
            OPENAI_API_KEY / OPENAI_BASE_URL are accepted as fallbacks.
+           OPENAI_API_KEY alone, with no base URL, goes to OpenAI itself.
 
   azure    Azure OpenAI
                export AZURE_OPENAI_API_KEY="..."
@@ -16,7 +16,7 @@ Two providers are supported and the pipeline runs identically on either:
            older scripts. Deployment names default to the model name; override
            with AZURE_DEPLOYMENT_MAP='{"gpt-5.5": "gpt-5-5-deploy"}'.
 
-Pick one with LLM_PROVIDER=gateway|azure|auto, or --provider on any step.
+Pick one with LLM_PROVIDER=gateway|azure|auto.
 `auto` (the default) prefers the gateway and falls back to Azure.
 
 No credentials are hardcoded here: everything comes from the environment.
@@ -27,18 +27,30 @@ missing their required section headers are errors, so no step can write a
 silently degenerate file and report success.
 """
 
+import base64
+import importlib.util
+import io
 import json
 import logging
+import mimetypes
 import os
 import random
 import re
 import time
 import warnings
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional, Tuple
 
-import tiktoken
-from langchain.callbacks.base import BaseCallbackHandler
-from langchain_openai import AzureChatOpenAI, ChatOpenAI
+from PIL import Image
+
+try:
+    import tiktoken
+    from langchain_core.callbacks import BaseCallbackHandler
+    from langchain_openai import AzureChatOpenAI, ChatOpenAI
+except ImportError:
+    BaseCallbackHandler = object
+    AzureChatOpenAI = ChatOpenAI = None
 
 # ---------------------------------------------------------------------------
 # Model registry
@@ -150,7 +162,8 @@ class GatewayConfig:
     @staticmethod
     def available() -> bool:
         return bool(_first_env(GatewayConfig.API_KEY_VARS)[1]
-                    and _first_env(GatewayConfig.BASE_URL_VARS)[1])
+                    and _first_env(GatewayConfig.BASE_URL_VARS)[1]
+                    or os.environ.get("OPENAI_API_KEY", "").strip())
 
     @staticmethod
     def _ensure_v1(base_url: str) -> str:
@@ -172,10 +185,13 @@ class GatewayConfig:
 
         var_name, base_url = _first_env(GatewayConfig.BASE_URL_VARS)
         if not base_url:
+            if os.environ.get("OPENAI_API_KEY", "").strip():
+                return os.environ["OPENAI_API_KEY"].strip(), None
             raise ProviderConfigError(
                 "Missing gateway base URL. Set one of: "
                 + ", ".join(GatewayConfig.BASE_URL_VARS)
-                + '  (e.g. export LITELLM_BASE_URL="https://<gateway-host>")'
+                + '  (e.g. export LITELLM_BASE_URL="https://<gateway-host>"), '
+                "or set OPENAI_API_KEY alone to use OpenAI itself"
             )
 
         base_url = GatewayConfig._ensure_v1(base_url)
@@ -266,7 +282,8 @@ def resolve_provider(requested: str = None) -> str:
         return PROVIDER_AZURE
 
     raise ProviderConfigError(
-        "No LLM provider is configured. Set either\n"
+        "No LLM provider is configured, and only the annotation stage needs one. Set one of\n"
+        '  openai:   export OPENAI_API_KEY="sk-..."\n'
         '  gateway:  export LITELLM_API_KEY="sk-..." '
         'and LITELLM_BASE_URL="https://<gateway-host>"\n'
         '  azure:    export AZURE_OPENAI_API_KEY="..." '
@@ -282,11 +299,18 @@ def describe_provider(provider: str = None, model: str = DEFAULT_MODEL) -> str:
         _, endpoint, api_version, deployment = AzureConfig.get_credentials(model)
         return f"azure {endpoint} (deployment={deployment}, api_version={api_version})"
     _, base_url = GatewayConfig.get_credentials(model)
-    return f"gateway {base_url}"
+    return f"gateway {base_url}" if base_url else "openai"
 
 
 def check_llm_credentials(provider: str = None, model: str = DEFAULT_MODEL) -> str:
     """Preflight so a run dies in the first second, not after step 1."""
+    missing = [name for name in ("langchain_openai", "sentence_transformers")
+               if importlib.util.find_spec(name) is None]
+    if missing:
+        raise ProviderConfigError(
+            f"Missing {', '.join(missing)}. Install them with pip install '.[annotation]' "
+            "in the CHART directory; only the annotation stage needs them."
+        )
     return describe_provider(provider, model)
 
 
@@ -471,7 +495,7 @@ def _reasoning_tokens(response) -> int:
 
 
 def _budget_hint(llm) -> str:
-    budget = getattr(llm, "max_completion_tokens", None)
+    budget = getattr(llm, "max_tokens", None)
     if budget is None:
         budget = (getattr(llm, "model_kwargs", None) or {}).get("max_completion_tokens")
     effort = getattr(llm, "reasoning_effort", None)
@@ -513,14 +537,14 @@ def invoke_text(
             raise EmptyResponseError(
                 f"{context}: model returned no text ({detail}; {_budget_hint(llm)}). "
                 "The completion budget is most likely being consumed by reasoning "
-                "tokens - raise --max_completion_tokens or lower --reasoning_effort."
+                "tokens - raise max_completion_tokens or lower reasoning_effort."
             )
 
         if finish == "length":
             raise TruncatedResponseError(
                 f"{context}: reply was cut off at the token ceiling "
                 f"({_budget_hint(llm)}, {len(text)} chars returned). "
-                "Raise --max_completion_tokens."
+                "Raise max_completion_tokens."
             )
 
         if len(text) < min_chars:
@@ -557,3 +581,102 @@ def invoke_text(
             f"{', '.join(missing)} after {attempt + 1} attempt(s). "
             f"First 300 chars: {text[:300]!r}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Images
+# ---------------------------------------------------------------------------
+
+MIN_RESOLUTION = (512, 512)
+
+ANNOTATION_SYSTEM_PROMPT = (
+    "You are a careful microscopy image analyst. When given an image, describe "
+    "only what is visible without guessing or bringing in prior biological "
+    "knowledge. Use precise and observational language."
+)
+
+
+class ImageError(PipelineError):
+    """An input image is missing, unreadable, or unusable."""
+
+
+def verify_image(image_path) -> Tuple[int, int]:
+    """Return (width, height); raise if the file is missing or unreadable."""
+    path = Path(image_path)
+    if not path.exists():
+        raise ImageError(f"Image not found: {path}")
+    try:
+        with Image.open(path) as img:
+            width, height = img.size
+    except Exception as exc:
+        raise ImageError(f"Could not read image {path}: {exc}") from exc
+
+    if width < MIN_RESOLUTION[0] or height < MIN_RESOLUTION[1]:
+        logging.warning(
+            "Image %s is below the %sx%s resolution guide (%sx%s)",
+            path.name, MIN_RESOLUTION[0], MIN_RESOLUTION[1], width, height,
+        )
+    return width, height
+
+
+def encode_image(image_path) -> Tuple[str, str]:
+    """Base64-encode an image at full resolution, with its MIME type."""
+    path = Path(image_path)
+    if not path.exists():
+        raise ImageError(f"Image not found: {path}")
+    data = path.read_bytes()
+    mime_type, _ = mimetypes.guess_type(str(path))
+    return base64.b64encode(data).decode(), mime_type or "image/png"
+
+
+def image_block(image_path, detail: str = "high", max_edge: Optional[int] = None) -> dict:
+    """An OpenAI-style image_url content block.
+
+    max_edge downsamples first, which is what the multi-image comparison steps
+    use to keep a handful of grids inside one request.
+    """
+    path = Path(image_path)
+    if not path.exists():
+        raise ImageError(f"Image not found: {path}")
+
+    if max_edge:
+        try:
+            with Image.open(path) as img:
+                img = img.convert("RGB")
+                img.thumbnail((max_edge, max_edge))
+                buffer = io.BytesIO()
+                img.save(buffer, format="PNG", optimize=True)
+                encoded = base64.b64encode(buffer.getvalue()).decode()
+        except Exception as exc:
+            raise ImageError(f"Could not downsample image {path}: {exc}") from exc
+        mime_type = "image/png"
+    else:
+        encoded, mime_type = encode_image(path)
+
+    return {
+        "type": "image_url",
+        "image_url": {"url": f"data:{mime_type};base64,{encoded}", "detail": detail},
+    }
+
+
+def analyze_image(
+    llm,
+    image_path,
+    prompt: str,
+    *,
+    context: str,
+    require=(),
+    detail: str = "high",
+) -> str:
+    """Send one image plus a prompt and return validated text."""
+    messages = [
+        {"role": "system", "content": ANNOTATION_SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt.strip()},
+                image_block(image_path, detail=detail),
+            ],
+        },
+    ]
+    return invoke_text(llm, messages, context=context, require=require)
