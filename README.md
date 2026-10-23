@@ -57,7 +57,7 @@ archetypes:
   all_channels: [DAPI1, TOM20, Golgin97]   # every channel the table holds
 ```
 
-Then run the four stages in order:
+Then run the five stages in order:
 
 ```
 chart preprocessing --config my_screen.yaml --all-wells
@@ -100,7 +100,7 @@ and writes the reports and a dashboard to `annotation/<channel>/` under
 
 Wells are read off the input filenames. Name wells
 individually with `--well` and channels with `--channel`, and use
-`--steps` on the first three to run only part of a pipeline.
+`--steps` on every stage but `chart effects` to run only part of a pipeline.
 `chart archetypes --dry-run` prints every command the stage would run
 without running any of them.
 
