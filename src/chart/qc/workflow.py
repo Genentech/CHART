@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 from ..io.config import (
+    SCHEMA_SECTION,
     BywellConfig,
     join_path,
     load_bywell_config
@@ -74,6 +75,19 @@ def _skip(result: 'WellQCResult', components: Sequence[str], name: str, reason: 
         raise ComponentUnavailableError(f"'{name}' was requested for well {result.well} but {reason}")
     logger.warning(f"Skipping '{name}' for well {result.well}: {reason}")
     result.skipped.append(name)
+
+
+def _require_columns(objects, schema, well: str, name: str, *keys: str) -> None:
+    """Stop when the objects table lacks a column component *name* reads."""
+    for key in keys:
+        value = getattr(schema, key)
+        for column in [value] if isinstance(value, str) else value:
+            if column not in objects.columns:
+                raise ValueError(
+                    f"The objects table of well {well} has no '{column}' "
+                    f"column, which '{SCHEMA_SECTION}.{key}' names for the "
+                    f"'{name}' component; set it, or leave the component "
+                    f"out with --components")
 
 
 def get_well_paths(config: Union[Dict[str, Any], BywellConfig], well: str) -> Dict[str, str]:
@@ -153,21 +167,32 @@ def process_well(config: Union[Dict[str, Any], BywellConfig],
                           sgrna_assigned=int(sgRNA_count))
 
     filter_entries: List[FilterEntry] = []
+    schema = config.schema
 
     # Plot size distributions
     if _enabled(components, 'plots'):
+        _require_columns(objects, schema, well, 'plots', 'nuclei_area_column',
+                         'cell_area_column', 'centroid_columns')
         logger.info("Plotting nuclear and cell size distributions...")
-        plot_nuclear_size(objects, well, save_plots, plots_dir)
-        plot_cell_size(objects, well, save_plots, plots_dir)
+        plot_nuclear_size(objects, well, save_plots, plots_dir,
+                          area_column=schema.nuclei_area_column,
+                          centroid_columns=schema.centroid_columns)
+        plot_cell_size(objects, well, save_plots, plots_dir,
+                       area_column=schema.cell_area_column,
+                       centroid_columns=schema.centroid_columns)
 
     # Detect segmentation errors
     if _enabled(components, 'segmentation'):
+        _require_columns(objects, schema, well, 'segmentation',
+                         'cytosol_area_column', 'nuclei_area_column')
         logger.info("Detecting segmentation errors...")
         high_ratio_errors = detect_segmentation_errors(
             objects, well,
             ratio_threshold=config.thresholds.segmentation_error_threshold,
             save_plots=save_plots,
-            output_dir=plots_dir
+            output_dir=plots_dir,
+            cytosol_area_column=schema.cytosol_area_column,
+            nuclei_area_column=schema.nuclei_area_column
         )
         entry = save_segmentation_filters(high_ratio_errors, well, paths['filter_dir'])
         if entry is not None:
@@ -192,6 +217,8 @@ def process_well(config: Union[Dict[str, Any], BywellConfig],
             _skip(result, components, 'pheno',
                   f"only {len(dapi_channel_names)} DAPI channel(s) configured, need at least 2")
         else:
+            _require_columns(objects, schema, well, 'pheno',
+                             'nuclei_bbox_columns', 'centroid_columns')
             logger.info("Computing pheno correlations...")
             cor_threshold = config.thresholds.pheno_correlation
             logger.info(f"Using pheno correlation threshold: {cor_threshold}")
@@ -199,7 +226,9 @@ def process_well(config: Union[Dict[str, Any], BywellConfig],
             pass_thre, mean_cors, num_passing, n_scored = compute_pheno_correlations(
                 objects, paths['pheno_dir'], well,
                 cor_threshold, save_plots, plots_dir,
-                dapi_channel_names=dapi_channel_names)
+                dapi_channel_names=dapi_channel_names,
+                bbox_columns=schema.nuclei_bbox_columns,
+                centroid_columns=schema.centroid_columns)
             phenocor_labels = objects.index[pass_thre]
             result.pheno_passing = int(num_passing)
             result.pheno_total = int(n_scored)

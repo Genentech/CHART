@@ -42,12 +42,19 @@ schema:
   control_gene: NTC
   control_prefix: OR
 
-  # Where the outlier position plot reads cell coordinates, y then x.
+  # Where the QC and outlier position plots read cell coordinates, y then x.
   centroid_columns: [nuclei_centroid-0, nuclei_centroid-1]
 
   # Where the archetypes crops step reads each cell's bounding box in the
   # objects tables: first row, first column, then one past the last of each.
   bbox_columns: [cell_bbox-0, cell_bbox-1, cell_bbox-2, cell_bbox-3]
+
+  # The areas the QC size plots and segmentation check read, and each
+  # nucleus's bounding box, in the order above, for the pheno QC check.
+  nuclei_area_column: nuclei_area
+  cell_area_column: cell_area
+  cytosol_area_column: cytosol_area
+  nuclei_bbox_columns: [nuclei_bbox-0, nuclei_bbox-1, nuclei_bbox-2, nuclei_bbox-3]
 
   # The well is deliberately absent: it comes from the well being
   # processed, not from a column.  See objects_pattern below.

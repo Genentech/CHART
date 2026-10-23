@@ -15,6 +15,7 @@ import pytest
 from chart.filtering.features import NoFeaturesError
 from chart.filtering.labels import NoCellsError
 from chart.filtering.workflow import run_filtering
+from chart.qc.workflow import run_qc
 
 WELL = 'A1'
 CELLS = 40
@@ -137,3 +138,24 @@ def test_feature_patterns_matching_nothing_are_reported(screen):
 
     with pytest.raises(NoFeaturesError, match='Cells_'):
         screen.run(config)
+
+
+def test_qc_reads_the_columns_the_schema_names(screen):
+    objects = screen.table('objects')
+    screen.write('objects', objects.assign(
+        Nuclei_Area=100.0, Cells_Area=600.0,
+        Cytoplasm_Area=np.where(objects['label'] < 3, 2000.0, 500.0),
+        Y=objects['nuclei_centroid-0'], X=objects['label'] * 10.0))
+    config = screen.config
+    config['schema'] = {'nuclei_area_column': 'Nuclei_Area',
+                        'cell_area_column': 'Cells_Area',
+                        'cytosol_area_column': 'Cytoplasm_Area',
+                        'centroid_columns': ['Y', 'X']}
+
+    result, = run_qc(config, wells=[WELL], components=['plots', 'segmentation'])
+    assert result.segmentation_errors == 3
+
+
+def test_qc_names_the_schema_key_of_a_missing_column(screen):
+    with pytest.raises(ValueError, match='schema.cytosol_area_column'):
+        run_qc(screen.config, wells=[WELL], components=['segmentation'])

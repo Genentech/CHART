@@ -35,7 +35,8 @@ NUCLEI_BBOX_COLS = ['nuclei_bbox-0', 'nuclei_bbox-1', 'nuclei_bbox-2', 'nuclei_b
 
 
 def compute_pheno_correlations(objects, pheno_dir, well, cor_threshold=0.8, save_plots=False,
-                               output_dir=None, *, dapi_channel_names):
+                               output_dir=None, *, dapi_channel_names,
+                               bbox_columns, centroid_columns):
     """Compute correlations between DAPI rounds in pheno images.
     Raises:
         RuntimeError: if scallops is unavailable, or if no object yielded a
@@ -53,7 +54,7 @@ def compute_pheno_correlations(objects, pheno_dir, well, cor_threshold=0.8, save
     logger.info(f"Loading registered pheno images ({n_rounds} DAPI rounds)...")
     if_reg = load_pheno_dapi_images(pheno_dir, well, dapi_channel_names)
 
-    bbox = objects.loc[:, NUCLEI_BBOX_COLS]
+    bbox = objects.loc[:, list(bbox_columns)]
     bbox = bbox.astype(pd.Int64Dtype())
 
     ref_ch = dapi_channel_names[0]
@@ -63,8 +64,8 @@ def compute_pheno_correlations(objects, pheno_dir, well, cor_threshold=0.8, save
     def cor_in_crop(row, img):
         """Correlate *ref_ch* against every other DAPI channel in a crop."""
         try:
-            tmp = img.isel(x=slice(row['nuclei_bbox-1'], row['nuclei_bbox-3']),
-                           y=slice(row['nuclei_bbox-0'], row['nuclei_bbox-2']))
+            y0, x0, y1, x1 = row
+            tmp = img.isel(x=slice(x0, x1), y=slice(y0, y1))
             ref = tmp.loc[ref_ch].to_numpy().flatten()
             return [pearsonr(ref, tmp.loc[ch].to_numpy().flatten())[0]
                     for ch in other_chs]
@@ -88,7 +89,7 @@ def compute_pheno_correlations(objects, pheno_dir, well, cor_threshold=0.8, save
         detail = "; ".join(failures) if failures else "every correlation was NaN (constant image crops?)"
         raise RuntimeError(
             f"All {cors.shape[0]} pheno correlations failed for well {well}. "
-            f"Check the DAPI channel names and the nuclei_bbox columns. First failures: {detail}"
+            f"Check the DAPI channel names and schema.nuclei_bbox_columns. First failures: {detail}"
         )
     if n_valid < cors.size:
         logger.warning(f"{cors.size - n_valid}/{cors.size} channel correlations could not be computed")
@@ -103,7 +104,8 @@ def compute_pheno_correlations(objects, pheno_dir, well, cor_threshold=0.8, save
         logger.info(f"Objects excluded for having an incomplete correlation set: {n_incomplete}")
     
     # Plot mean correlations
-    plot_pheno_correlations(objects, mean_cors, well, n_rounds, save_plots, output_dir)
+    plot_pheno_correlations(objects, mean_cors, well, n_rounds, save_plots, output_dir,
+                            centroid_columns=centroid_columns)
     
     # Apply threshold filter
     pass_thre = mean_cors >= cor_threshold
@@ -112,7 +114,8 @@ def compute_pheno_correlations(objects, pheno_dir, well, cor_threshold=0.8, save
     logger.info(f"Nuclei passing pheno correlation threshold: {num_passing}")
     
     # Plot threshold results
-    plot_pheno_correlation_filter(objects, pass_thre, well, save_plots, output_dir)
+    plot_pheno_correlation_filter(objects, pass_thre, well, save_plots, output_dir,
+                                  centroid_columns=centroid_columns)
     
     return pass_thre, mean_cors, num_passing, total_objects
 
