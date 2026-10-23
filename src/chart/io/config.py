@@ -224,7 +224,7 @@ class SchemaConfig:
     control_gene: str = 'NTC'
     control_prefix: str = 'OR'
 
-    #: Where the outlier position plot reads cell coordinates.
+    #: Where the QC and outlier position plots read cell coordinates.
     centroid_columns: List[str] = field(
         default_factory=lambda: ['nuclei_centroid-0', 'nuclei_centroid-1'])
     #: Where the crops step reads each cell's bounding box in the objects
@@ -232,6 +232,15 @@ class SchemaConfig:
     bbox_columns: List[str] = field(
         default_factory=lambda: ['cell_bbox-0', 'cell_bbox-1',
                                  'cell_bbox-2', 'cell_bbox-3'])
+    #: The areas the QC size plots and segmentation check read.
+    nuclei_area_column: str = 'nuclei_area'
+    cell_area_column: str = 'cell_area'
+    cytosol_area_column: str = 'cytosol_area'
+    #: Each nucleus's bounding box, ordered as ``bbox_columns``, for the
+    #: pheno QC component.
+    nuclei_bbox_columns: List[str] = field(
+        default_factory=lambda: ['nuclei_bbox-0', 'nuclei_bbox-1',
+                                 'nuclei_bbox-2', 'nuclei_bbox-3'])
 
     def rename_map(self) -> Dict[str, str]:
         """Map the caller's column names onto the ones the steps read.

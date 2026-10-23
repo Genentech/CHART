@@ -19,12 +19,14 @@ def detect_segmentation_errors(objects: pd.DataFrame,
                               well: str,
                               ratio_threshold: float = 15.0,
                               save_plots: bool = False,
-                              output_dir: Optional[str] = None) -> pd.Series:
+                              output_dir: Optional[str] = None, *,
+                              cytosol_area_column: str,
+                              nuclei_area_column: str) -> pd.Series:
     """
     Detect segmentation errors based on cytosol-to-nucleus area ratio.
     
     Args:
-        objects: DataFrame containing object features with 'cytosol_area' and 'nuclei_area' columns
+        objects: DataFrame containing object features with the two area columns
         well: Well identifier for labeling
         ratio_threshold: Threshold for cytosol/nucleus area ratio (default: 15.0)
         save_plots: Whether to save plots to output directory
@@ -34,7 +36,7 @@ def detect_segmentation_errors(objects: pd.DataFrame,
         Boolean Series indicating which objects are likely segmentation errors
     """
     # Calculate cytosol-to-nucleus area ratio
-    cyto_nuc_ratio = objects['cytosol_area'] / objects['nuclei_area']
+    cyto_nuc_ratio = objects[cytosol_area_column] / objects[nuclei_area_column]
     
     # Identify potential segmentation errors (high ratio)
     segmentation_errors = cyto_nuc_ratio > ratio_threshold

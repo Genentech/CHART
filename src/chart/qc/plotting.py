@@ -12,14 +12,16 @@ import numpy as np
 import os
 
 
-def plot_nuclear_size(objects, well, save_plots=False, output_dir=None):
+def plot_nuclear_size(objects, well, save_plots=False, output_dir=None, *,
+                      area_column, centroid_columns):
     """Plot nuclear size distribution."""
-    nuc_area = objects['nuclei_area']
+    nuc_area = objects[area_column]
+    y, x = centroid_columns
     
     fig, ax = plt.subplots(figsize=(8.5, 7))
     plt.gca().invert_yaxis()
-    scatter = plt.scatter(x=objects.loc[:, 'nuclei_centroid-1'],
-                         y=objects.loc[:, 'nuclei_centroid-0'],
+    scatter = plt.scatter(x=objects.loc[:, x],
+                         y=objects.loc[:, y],
                          c=np.log10(nuc_area), s=0.01)
     plt.title(f'Nuclear size - {well}')
     plt.colorbar(scatter)
@@ -32,14 +34,16 @@ def plot_nuclear_size(objects, well, save_plots=False, output_dir=None):
     plt.close(fig)
 
 
-def plot_cell_size(objects, well, save_plots=False, output_dir=None):
+def plot_cell_size(objects, well, save_plots=False, output_dir=None, *,
+                   area_column, centroid_columns):
     """Plot cell size distribution."""
-    cell_area = objects['cell_area']
+    cell_area = objects[area_column]
+    y, x = centroid_columns
     
     fig, ax = plt.subplots(figsize=(8.5, 7))
     plt.gca().invert_yaxis()
-    scatter = plt.scatter(x=objects.loc[:, 'cell_centroid-1'],
-                         y=objects.loc[:, 'cell_centroid-0'],
+    scatter = plt.scatter(x=objects.loc[:, x],
+                         y=objects.loc[:, y],
                          c=np.log10(cell_area), s=0.01)
     plt.title(f'Cell size - {well}')
     plt.colorbar(scatter)
@@ -92,12 +96,14 @@ def plot_segmentation_error_distribution(cyto_nuc_ratio: pd.Series,
 
 
 def plot_pheno_correlations(objects, mean_cors, well, n_rounds,
-                            save_plots=False, output_dir=None):
+                            save_plots=False, output_dir=None, *,
+                            centroid_columns):
     """Plot mean DAPI correlation across pheno rounds."""
+    y, x = centroid_columns
     fig, ax = plt.subplots(figsize=(8.5, 7))
     plt.gca().invert_yaxis()
-    scatter = plt.scatter(x=objects.loc[:, 'nuclei_centroid-1'],
-                         y=objects.loc[:, 'nuclei_centroid-0'],
+    scatter = plt.scatter(x=objects.loc[:, x],
+                         y=objects.loc[:, y],
                          s=0.01, c=mean_cors, cmap='RdYlBu_r',
                          vmin=-1, vmax=1)
     plt.title(f'Mean DAPI correlation across {n_rounds} pheno rounds - {well}')
@@ -112,13 +118,15 @@ def plot_pheno_correlations(objects, mean_cors, well, n_rounds,
 
 
 def plot_pheno_correlation_filter(objects, pass_thre, well,
-                                  save_plots=False, output_dir=None):
+                                  save_plots=False, output_dir=None, *,
+                                  centroid_columns):
     """Plot which nuclei pass the pheno correlation threshold."""
+    y, x = centroid_columns
     cmap = mcolors.ListedColormap(['#AA98A9', '#007BA7'])
     fig, ax = plt.subplots(figsize=(7, 7))
     plt.gca().invert_yaxis()
-    plt.scatter(x=objects.loc[:, 'nuclei_centroid-1'],
-                y=objects.loc[:, 'nuclei_centroid-0'],
+    plt.scatter(x=objects.loc[:, x],
+                y=objects.loc[:, y],
                 c=pass_thre, cmap=cmap, s=0.01)
     plt.title(f'Nuclei w/ good enough pheno registration - {well}')
     
