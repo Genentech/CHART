@@ -35,8 +35,11 @@ dependencies = [
 # on PyPI, so it has to be installed separately; without it CHART skips the
 # components that need image data rather than failing.
 
+# The annotation stage is optional, so its packages are an extra.
+
 [project.optional-dependencies]
 dev = ["pytest"]
+annotation = ["langchain-openai>=0.3.30", "sentence-transformers"]
 
 [project.scripts]
 chart = "chart.cli:main"
