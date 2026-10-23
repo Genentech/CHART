@@ -1,17 +1,21 @@
-# The R side of CHART, which the archetypes stage runs through Rscript.
-# The rest of CHART is Python and installs with the package.
+# CHART with SCALLOPS, and the R side, which the archetypes stage runs
+# through Rscript.  Run from the repository root:
 #
 #   mamba env create -f environment.yml
-#   conda activate chart-r
+#   conda activate chart
 #   Rscript -e 'install.packages("archetypes", repos="https://cloud.r-project.org")'
 #
 # That last line is needed because 'archetypes' is on CRAN but has not
 # been packaged for conda-forge.  Its own dependencies are listed below,
 # so the install finds them rather than compiling them.
-name: chart-r
+name: chart
 channels:
   - conda-forge
 dependencies:
+  # SCALLOPS needs 3.12.
+  - python =3.12
+  - pip
+
   # The scripts are written against 4.5; r-supercell is built per R
   # minor version, so this and the build it resolves to have to agree.
   - r-base >=4.5,<4.6
@@ -33,3 +37,7 @@ dependencies:
   # does not have to build them from source.
   - r-modeltools
   - r-nnls
+
+  - pip:
+      - .
+      - scallops

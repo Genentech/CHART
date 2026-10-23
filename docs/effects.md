@@ -2,6 +2,12 @@
 
 `chart effects` tests every perturbation against the controls on every archetype of each channel, using the archetype weights from `chart archetypes`. Once every channel has been tested, the p-values of all channels are corrected together, and the result, `effects/pooled.parquet`, is the input to `chart programs`.
 
+```{image} ../images/effects_diagram.svg
+:alt: How chart effects compares a perturbation with the controls
+:width: 280px
+:align: center
+```
+
 ## Usage
 
 > [!IMPORTANT]
@@ -24,6 +30,21 @@ chart effects --config my_screen.yaml --channel TOM20 CALR
 Channels can be tested in separate runs, for instance as separate cluster jobs. Each run ends by pooling, which happens only once every channel in `archetypes.channels` has a table, from that run or an earlier one; until then it is skipped with a warning. A channel that fails in a run blocks pooling in that run, since any table of its on disk is from an earlier one. `--continue-on-error` carries on with the remaining channels after a failure.
 
 Perturbations are distributed over worker processes, by default one per core available to the run, which under SLURM is the job's allocation. `effects.n_jobs` sets their number for this stage, the top-level `n_jobs` for every stage, and `--n-jobs` overrides both.
+
+## Configuration
+
+```yaml
+effects:
+  outputs_dir: effects/
+  n_perm: 1000          # permutations per test
+  trimmed_alpha: 0.02   # tail fraction discarded for w1_trimmed
+  seed: 42
+  # n_jobs: -1          # worker processes; the top-level n_jobs unless set
+```
+
+The values shown are the defaults, and those of the published analysis. The stage also reads `archetypes.channels`, `archetypes.archetypes_to_remove`, and the controls defined by `schema.control_gene` and `schema.control_prefix`.
+
+A permutation p-value cannot fall below $1/(n_\mathrm{perm} + 1)$, and since Benjamini–Hochberg never lowers a p-value, neither can a q-value. With 1000 permutations the floor is about $10^{-3}$, which leaves room below the default `programs.qval_threshold` of 0.01; a stricter threshold needs more permutations.
 
 ## Outputs
 
@@ -49,21 +70,6 @@ All tables are written to `effects/` under `data_output_dir`.
 | `n_wells` | wells in which the perturbation appears |
 
 `w1` and `signed_w1` are in centred log-ratio (CLR) units. `chart programs` uses `signed_w1` and `qval`; `w1_trimmed` indicates how much of an effect is carried by the tails.
-
-## Configuration
-
-```yaml
-effects:
-  outputs_dir: effects/
-  n_perm: 1000          # permutations per test
-  trimmed_alpha: 0.02   # tail fraction discarded for w1_trimmed
-  seed: 42
-  # n_jobs: -1          # worker processes; the top-level n_jobs unless set
-```
-
-The values shown are the defaults, and those of the published analysis. The stage also reads `archetypes.channels`, `archetypes.archetypes_to_remove`, and the controls defined by `schema.control_gene` and `schema.control_prefix`.
-
-A permutation p-value cannot fall below $1/(n_\mathrm{perm} + 1)$, and since Benjamini–Hochberg never lowers a p-value, neither can a q-value. With 1000 permutations the floor is about $10^{-3}$, which leaves room below the default `programs.qval_threshold` of 0.01; a stricter threshold needs more permutations.
 
 ## Method
 

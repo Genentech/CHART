@@ -4,6 +4,12 @@
 
 It reads the grids drawn by the `crops` step of `chart archetypes`, leaving out the archetypes listed under `archetypes.archetypes_to_remove`. The packages and credentials it needs are described under [Installation](installation.md).
 
+```{image} ../images/annotation_diagram.svg
+:alt: How chart annotation describes, compares and refines each archetype
+:width: 100%
+:align: center
+```
+
 ## Usage
 
 Each channel needs one or more normal archetypes, chosen from the crops, against which every archetype is compared:
@@ -28,10 +34,29 @@ chart annotation --config my_screen.yaml --channel TOM20 --steps annotate baseli
 | `refine` | Summaries that read alike, contrasted pairwise and rewritten |
 | `dashboard` | The final reports beside their grids, in one HTML file |
 
-The steps run in order, each reading the previous step's output. `--resume` keeps the descriptions `annotate` has already written, so an interrupted run continues where it stopped. `--continue-on-error` carries on with the remaining channels after a failure. `dashboard` on its own needs no model or credentials.
+`--steps` takes one or more step names from the table, separated by spaces; without it, every step runs. Only the named steps run, always in the table's order, whatever order they are given in. Each step reads what the step before it wrote: from this run if that step ran, otherwise from an earlier run. A step whose input is missing stops with an error. After changing a setting, rerun the step that reads it and every step after it, for instance, after changing `annotation.normal_archetypes`:
+
+```
+chart annotation --config my_screen.yaml --channel TOM20 --steps baseline synthesize refine dashboard
+```
+
+`--resume` keeps the descriptions `annotate` has already written, so an interrupted run continues where it stopped. `--continue-on-error` carries on with the remaining channels after a failure. `dashboard` on its own needs no model or credentials.
 
 > [!NOTE]
 > Calls are made one at a time. For a channel with $K$ archetypes, `annotate` makes up to $2K$ image calls, `baseline` $K$, `synthesize` $2K$ text calls, and `refine` two image calls per similar pair and one rewrite per archetype in a pair. `refine` compares summaries with the sentence-transformers model `all-MiniLM-L6-v2`, downloaded from Hugging Face on first use; on a machine without internet access, download it beforehand.
+
+## Configuration
+
+```yaml
+annotation:
+  reports_dir: annotation/       # under local_output_dir
+  normal_archetypes: {}          # per channel, by archetype number
+  model: gpt-5.5
+  similarity_threshold: 0.08     # cosine distance below which summaries are contrasted
+  max_pairs_per_archetype: 0     # closest partners kept per archetype; 0 keeps all
+```
+
+The values shown are the defaults. `normal_archetypes` has to be set for every channel before `baseline` runs. The stage also reads `archetypes.channels`, `archetypes.archetypes_to_remove`, and `archetypes.reports_dir`, under which the crops are.
 
 ## Outputs
 
@@ -46,19 +71,6 @@ All files are written to `annotation/<channel>/` under `local_output_dir`. Arche
 | `archetype_reviews/archetype<N>_final.md` | Final summary, names, hypothesis, and the archetypes it was contrasted with |
 | `archetype_reviews/combined_archetype_synthesis.md`, `combined_archetype_final.md` | Every archetype's report in one file |
 | `archetype_dashboard.html` | The final reports with their grids embedded, readable anywhere |
-
-## Configuration
-
-```yaml
-annotation:
-  reports_dir: annotation/       # under local_output_dir
-  normal_archetypes: {}          # per channel, by archetype number
-  model: gpt-5.5
-  similarity_threshold: 0.08     # cosine distance below which summaries are contrasted
-  max_pairs_per_archetype: 0     # closest partners kept per archetype; 0 keeps all
-```
-
-The values shown are the defaults. `normal_archetypes` has to be set for every channel before `baseline` runs. The stage also reads `archetypes.channels`, `archetypes.archetypes_to_remove`, and `archetypes.reports_dir`, under which the crops are.
 
 ## Method
 

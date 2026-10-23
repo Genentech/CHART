@@ -18,29 +18,17 @@ chart preprocessing --config my_screen.yaml --well A1 --steps qc filter
 | `outliers` | across wells | Outlier cells removed within each perturbation |
 | `guides` | across wells | Unreliable guides removed; cell, guide and perturbation tables |
 
-The steps run in order. With `--well`, only the per-well steps run unless the across-wells steps are named in `--steps`, since those write one table for the whole screen. The per-well steps can therefore run as separate jobs, one per well, followed by a single `--all-wells --steps combine normalize outliers guides`. When steps run together, a step whose input was not written earlier in the same run stops rather than read an older table; naming it alone in `--steps` uses the existing table.
+`--steps` takes one or more step names from the table, separated by spaces; without it, every step runs. Only the named steps run, always in the table's order, whatever order they are given in. Each step reads what the step before it wrote: from this run if that step ran, otherwise from an earlier run. A step whose input is missing stops with an error. After changing a setting, rerun the step that reads it and every step after it, for instance, after changing `guide_filtering.cosine_similarity_threshold`:
 
-`--components` selects the quality-control components: `plots`, `segmentation`, `pheno`, `pheno_sbs`, and `filters`, which writes the lists. A component whose prerequisites are missing, such as image directories or scallops, is skipped with a warning, or stops the run when named in `--components`.
+```
+chart preprocessing --config my_screen.yaml --all-wells --steps guides
+```
+
+With `--well`, only the per-well steps run unless the across-wells steps are named in `--steps`, since those write one table for the whole screen. The per-well steps can therefore run as separate jobs, one per well, followed by a single `--all-wells --steps combine normalize outliers guides`. If the step before it runs in the same command but fails or writes nothing, a step does not run rather than read an older table.
+
+`--components` selects the quality-control components: `plots`, `segmentation`, `pheno`, `pheno_sbs`, and `filters`, which writes the lists. A component whose prerequisites are missing, such as image directories or SCALLOPS, is skipped with a warning, or stops the run when named in `--components`.
 
 Plots are written only with `--save-plots`; `--validate` adds before-and-after distributions of the normalisation. `--continue-on-error` carries on with the remaining wells after a failure. `normalize` and `guides` use every core available to the run; the top-level `n_jobs`, or `--n-jobs`, sets a number instead. The log is written to `preprocessing/bywell/qc_reports/` under `local_output_dir`.
-
-## Outputs
-
-Tables are written under `data_output_dir`; filter lists, records and plots under `local_output_dir`.
-
-| File | Under | Contents |
-|---|---|---|
-| `preprocessing/bywell/filters/<well>_*.parquet` | local | The well's filter lists, and `<well>_filters.json`, the components run and the lists written |
-| `preprocessing/bywell/filtered/<well>-objects.parquet`, `<well>-features.parquet`, `<well>.parquet` | data | The well's filtered objects, features, and both joined |
-| `preprocessing/allwells/combined/allwells-objects.parquet`, `allwells-features.parquet` | data | All wells stacked |
-| `preprocessing/allwells/normalized/allwells-features_cell.parquet` | data | Normalised features |
-| `preprocessing/allwells/outlier_filtered/allwells-features_cell_outlier_filtered.parquet` | data | Outlier cells removed; `_guide_outlier_filtered` holds the per-guide medians |
-| `preprocessing/allwells/filters/outlier_filters.parquet` | local | Every cell removed and why; `outlier_filters.json` records the settings |
-| `guide_filtering/guide_filtered/allwells-features_cell.parquet` | data | The final cell table, read by `chart archetypes` |
-| `guide_filtering/guide_filtered/allwells-features_guide.parquet`, `allwells-features_gene.parquet` | data | Per-guide medians, and per-perturbation medians of those |
-| `guide_filtering/filters/guide_filters.parquet` | local | Every guide removed and why; `guide_filters.json` records the settings |
-
-Cells are indexed by `Label`, `Guide`, `Gene` and `Well` from `combine` on.
 
 ## Configuration
 
@@ -66,7 +54,7 @@ guide_filtering:
 
 The values shown are the defaults. The stage also reads `schema`, and the input settings described under [Your data](data.md).
 
-The `pheno` and `pheno_sbs` components read their images through scallops, from these keys under `preprocessing_bywell.global` or `preprocessing_bywell.wells.<well>`:
+The `pheno` and `pheno_sbs` components read their images through SCALLOPS, from these keys under `preprocessing_bywell.global` or `preprocessing_bywell.wells.<well>`:
 
 | Key | Contents |
 |---|---|
@@ -78,6 +66,24 @@ The `pheno` and `pheno_sbs` components read their images through scallops, from 
 | `sbs_feature_dir` | Holds `nuclei/<well>-objects.parquet`, the nuclei in sequencing coordinates |
 
 Filters computed elsewhere are added under `preprocessing_bywell.precomputed_filters`, one entry per filter, keyed by its name. Each entry gives `path`, a directory; `file_pattern`, default `{well}-objects.parquet`; optionally `threshold_column` and `threshold`, keeping the rows at or above the threshold; and `role`, `inclusion` (default) or `exclusion`. The table's index has to hold the cell labels.
+
+## Outputs
+
+Tables are written under `data_output_dir`; filter lists, records and plots under `local_output_dir`.
+
+| File | Under | Contents |
+|---|---|---|
+| `preprocessing/bywell/filters/<well>_*.parquet` | local | The well's filter lists, and `<well>_filters.json`, the components run and the lists written |
+| `preprocessing/bywell/filtered/<well>-objects.parquet`, `<well>-features.parquet`, `<well>.parquet` | data | The well's filtered objects, features, and both joined |
+| `preprocessing/allwells/combined/allwells-objects.parquet`, `allwells-features.parquet` | data | All wells stacked |
+| `preprocessing/allwells/normalized/allwells-features_cell.parquet` | data | Normalised features |
+| `preprocessing/allwells/outlier_filtered/allwells-features_cell_outlier_filtered.parquet` | data | Outlier cells removed; `_guide_outlier_filtered` holds the per-guide medians |
+| `preprocessing/allwells/filters/outlier_filters.parquet` | local | Every cell removed and why; `outlier_filters.json` records the settings |
+| `guide_filtering/guide_filtered/allwells-features_cell.parquet` | data | The final cell table, read by `chart archetypes` |
+| `guide_filtering/guide_filtered/allwells-features_guide.parquet`, `allwells-features_gene.parquet` | data | Per-guide medians, and per-perturbation medians of those |
+| `guide_filtering/filters/guide_filters.parquet` | local | Every guide removed and why; `guide_filters.json` records the settings |
+
+Cells are indexed by `Label`, `Guide`, `Gene` and `Well` from `combine` on.
 
 ## Method
 
@@ -101,4 +107,4 @@ Filters computed elsewhere are added under `preprocessing_bywell.precomputed_fil
 | `Prefiltering left ... cells and ... columns ...` | The prefilters removed everything; check `missing_value_threshold` and `rcv_threshold`, or `--skip-prefilters` |
 | `No control guides among ... rows ...` | No perturbation matches `schema.control_gene` or `schema.control_prefix` |
 | `Guide filtering removed every cell ...` | `cosine_similarity_threshold` or `min_cells_per_guide` is too strict for the screen |
-| `'...' was requested for well ... but ...` | A component named in `--components` lacks its images, settings or scallops |
+| `'...' was requested for well ... but ...` | A component named in `--components` lacks its images, settings or SCALLOPS |

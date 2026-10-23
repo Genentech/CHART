@@ -4,35 +4,33 @@ CHART is a Python package (Python ≥ 3.9) that installs the `chart` command. So
 
 | Component | Needed for | Install |
 |---|---|---|
-| CHART | every stage | `pip install .` |
+| CHART | every stage | `environment.yml` |
 | R 4.5 and its packages | `chart archetypes`, every step but `pca` and `crops` | `environment.yml` |
-| scallops | the `crops` step of `chart archetypes`; the `pheno` and `pheno_sbs` QC components | `pip install scallops` |
+| SCALLOPS | the `crops` step of `chart archetypes`; the `pheno` and `pheno_sbs` QC components | `environment.yml` |
 | annotation extra | `chart annotation` | `pip install ".[annotation]"` |
 | fsspec and a filesystem driver | inputs or outputs on remote storage | `pip install fsspec s3fs` for S3 |
 
 ## CHART
 
+`environment.yml` describes a conda environment, `chart`, with Python 3.12, CHART, SCALLOPS, and R 4.5 with the packages the archetype scripts load. The environment installs CHART from the repository, so the commands run from its root. The `archetypes` R package is on CRAN but not conda-forge, so it is installed separately:
+
 ```
 git clone https://github.com/Genentech/CHART.git
 cd CHART
-pip install .
-```
-
-## R
-
-All steps of `chart archetypes` except `pca` and `crops` are R scripts, which the stage runs with `Rscript`. `environment.yml` describes a conda environment, `chart-r`, with R 4.5 and the packages the scripts load. The `archetypes` package is on CRAN but not conda-forge, so it is installed separately:
-
-```
 mamba env create -f environment.yml
-conda activate chart-r
+conda activate chart
 Rscript -e 'install.packages("archetypes", repos="https://cloud.r-project.org")'
 ```
 
-`Rscript` must be on `PATH` when `chart archetypes` runs, for instance with `chart-r` activated alongside the Python environment holding CHART. Before its first step, the stage checks that R can load every package the scripts need, and names any it cannot. The compiled packages, `r-supercell` in particular, are built for one R minor version, which is why the environment fixes R to 4.5.
+Without conda, `pip install .` installs CHART alone into an existing Python environment; R and SCALLOPS are then installed separately.
 
-## scallops
+## R
 
-[scallops](https://github.com/Genentech/scallops) reads the registered images. Without it, CHART skips the components that need images, with a warning: the crops of archetypal cells, and the phenotype-correlation QC components. An explicit request for one of them, `--steps crops` or `--components pheno`, fails instead. scallops requires Python ≥ 3.12.
+All steps of `chart archetypes` except `pca` and `crops` are R scripts, which the stage runs with `Rscript`. `Rscript` must be on `PATH` when `chart archetypes` runs, as it is with `chart` activated. Before its first step, the stage checks that R can load every package the scripts need, and names any it cannot. The compiled packages, `r-supercell` in particular, are built for one R minor version, which is why the environment fixes R to 4.5.
+
+## SCALLOPS
+
+[SCALLOPS](https://github.com/Genentech/scallops), described in [Gould et al. (2026)](https://doi.org/10.64898/2026.05.22.727250), *bioRxiv*, reads the registered images. Without it, CHART skips the components that need images, with a warning: the crops of archetypal cells, and the phenotype-correlation QC components. An explicit request for one of them, `--steps crops` or `--components pheno`, fails instead. SCALLOPS is part of the `chart` environment; installed separately, with `pip install scallops`, it requires Python ≥ 3.12.
 
 ## Annotation
 

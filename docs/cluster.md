@@ -49,7 +49,7 @@ Memory is the limiting resource for `chart archetypes`. For one channel of 875,0
 
 ## Compute nodes
 
-`chart archetypes` needs `Rscript` on `PATH`, so the job script activates the R environment described under [Installation](installation.md); the stage checks that R can load every package before its first step. The `pheno` and `pheno_sbs` components and the `crops` step need scallops on the node.
+`chart archetypes` needs `Rscript` on `PATH`, so the job script activates the environment described under [Installation](installation.md); the stage checks that R can load every package before its first step. The `pheno` and `pheno_sbs` components and the `crops` step need SCALLOPS on the node.
 
 `chart annotation` needs network access to the model's endpoint, and the credentials in environment variables. SLURM passes the submitting shell's environment to the job by default, so they can be exported before `sbatch`. The `refine` step loads the all-MiniLM-L6-v2 model from Hugging Face on first use; where compute nodes have no internet access, download it beforehand into a Hugging Face cache (`HF_HOME`) that the nodes share.
 

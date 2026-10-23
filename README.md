@@ -1,6 +1,6 @@
 # CHART
 
-**CHART** (**Cellular High-content imaging Archetype Response Toolkit**) translates high-content imaging features into interpretable morphological phenotypes. CHART identifies marker-specific cellular archetypes, annotates representative images using multimodal large language models, and integrates co-regulated archetypes into morphological programs that describe coordinated cellular responses to perturbation.
+**CHART** (**Cellular High-content imaging Archetype Response Toolkit**) translates high-content imaging features into interpretable morphological phenotypes. CHART identifies marker-specific cellular archetypes, annotates representative images using multimodal large language models, and integrates co-regulated archetypes into morphological programs that describe coordinated cellular responses to perturbation. The method and its application are described in [Coelho, Leote et al. (2026)](https://doi.org/10.64898/2026.10.07.757470), *bioRxiv*.
 
 ![Overview of the CHART framework](images/chart_diagram.png)
 
@@ -17,19 +17,15 @@ The [documentation](https://genentech.github.io/CHART/) describes the input data
 
 ## Installation
 
-```
-pip install .
-```
-
-The archetype analysis also needs R and the packages in `environment.yml`:
+`environment.yml` describes a conda environment with CHART, SCALLOPS, and the R packages the archetype analysis needs. From the repository root:
 
 ```
 mamba env create -f environment.yml
-conda activate chart-r
+conda activate chart
 Rscript -e 'install.packages("archetypes", repos="https://cloud.r-project.org")'
 ```
 
-The optional annotation stage needs `pip install ".[annotation]"` and credentials for a language model in the environment. [Installation](https://genentech.github.io/CHART/installation.html) covers these, scallops for reading images, and remote storage.
+The optional annotation stage needs `pip install ".[annotation]"` and credentials for a language model in the environment. [Installation](https://genentech.github.io/CHART/installation.html) covers these, SCALLOPS for reading images, and remote storage.
 
 ## Quickstart
 
@@ -58,3 +54,13 @@ chart programs --config my_screen.yaml
 ```
 
 Before `chart effects`, inspect each archetype's crops under `archetypes/<channel>/crops/` in `local_output_dir`, and list those reflecting segmentation errors or staining artefacts under `archetypes.archetypes_to_remove`, as described in [Curating archetypes](https://genentech.github.io/CHART/archetypes.html#curating-archetypes). `example_config.yaml` lists every setting, and [Configuration](https://genentech.github.io/CHART/configuration.html) explains which matter most.
+
+## Citation
+
+If you use CHART in your work, please cite:
+
+> **Archetype analysis of multiplexed antibody imaging reveals interpretable morphological programs in optical pooled screens**
+>
+> P. P. Coelho, A. C. Leote, H. Yao, P. Wu, T. Kudo, H. Wang, V. Ermakov, A. Saboowala, T. Makino, R. Littman, R. Lopez, J. Kim, T. Hafner, O. Rozenblatt-Rosen, D. Richmond, L. Garraway, A. Singh, J. Marioni, A. Regev
+>
+> _bioRxiv_ 2026. doi: [10.64898/2026.10.07.757470](https://doi.org/10.64898/2026.10.07.757470)

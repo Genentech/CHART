@@ -40,7 +40,7 @@ schema:
   # Which gene values are controls: this name, or this prefix.  Set
   # control_prefix to null for screens with no prefix convention.
   control_gene: NTC
-  control_prefix: OR
+  control_prefix: OR # olfactory receptor negative control
 
   # Where the QC and outlier position plots read cell coordinates, y then x.
   centroid_columns: [nuclei_centroid-0, nuclei_centroid-1]
@@ -98,7 +98,7 @@ preprocessing_bywell:
   # global:
   #   sbs_dir: /path/to/sbs
   #   sbs_feature_dir: /path/to/sbs/features
-  #   dapi_channel_names: [DAPI, GFP, DAPI]
+  #   dapi_channel_names: [DAPI1]
   #   cell_labels_dir: /path/to/cell-seg.zarr
   #   nuclei_labels_dir: /path/to/nuclei-seg.zarr
   # wells:

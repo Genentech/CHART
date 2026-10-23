@@ -2,6 +2,12 @@
 
 `chart archetypes` describes each channel's single-cell morphology as a mixture of archetypes, extreme morphological states between which every cell lies. It builds a PCA space from the channel's features, groups the cells into metacells, fits archetypal analysis to the metacells, and weights every cell on each archetype. The weights are the input to `chart effects` and `chart programs`; the last step crops each archetype's most heavily weighted cells from the images, for inspection and for `chart annotation`.
 
+```{image} ../images/archetypes_diagram.svg
+:alt: How chart archetypes finds archetypes and weights cells on them
+:width: 100%
+:align: center
+```
+
 ## Usage
 
 ```
@@ -20,6 +26,12 @@ chart archetypes --config my_screen.yaml --channel TOM20 --steps selectk weights
 | `weights` | R | Every cell's weight on each of the K archetypes |
 | `crops` | Python | Each archetype's top cells, cropped from the images |
 
+`--steps` takes one or more step names from the table, separated by spaces; without it, every step runs. Only the named steps run, always in the table's order, whatever order they are given in. Each step reads what the step before it wrote: from this run if that step ran, otherwise from an earlier run. A step whose input is missing stops with an error. After changing a setting, rerun the step that reads it and every step after it, for instance, after setting `archetypes.k`:
+
+```
+chart archetypes --config my_screen.yaml --channel TOM20 --steps selectk weights crops
+```
+
 The R steps need the environment described under [Installation](installation.md); the stage checks that R can load every package before the first step. `--dry-run` prints every command the stage would run, and needs no R. `--continue-on-error` carries on with the remaining steps and channels after a failure.
 
 Channels run one at a time. `archetypes.parallel_channels`, or `--parallel-channels`, runs several at once, each in its own process and logging to `archetypes/<channel>/` under `local_output_dir`. Memory, not cores, limits how many fit: the `metacells` step needed about 62 GB for one channel of 875,000 cells. Channels can also run as separate jobs with `--channel`.
@@ -27,7 +39,31 @@ Channels run one at a time. `archetypes.parallel_channels`, or `--parallel-chann
 > [!IMPORTANT]
 > `selectk` chooses K automatically and says so in the log. Check its choice against `evalK_recovery_plot.png` before going further; to overrule it, set `archetypes.k` for the channel and rerun `--steps selectk weights crops`.
 
-`crops` needs scallops, the image locations described under [Your data](data.md), and the channel's position in the images under `archetypes.image_channels`. Without them the step is skipped with a warning, or stops the run under `--steps crops`. Once the crops are drawn, curate the archetypes, as described under Curating archetypes below, before running `chart effects`.
+`crops` needs SCALLOPS, the image locations described under [Your data](data.md), and the channel's position in the images under `archetypes.image_channels`. Without them the step is skipped with a warning, or stops the run under `--steps crops`. Once the crops are drawn, curate the archetypes, as described under Curating archetypes below, before running `chart effects`.
+
+## Configuration
+
+```yaml
+archetypes:
+  channels: [TOM20, Golgin97]
+  all_channels: [DAPI1, TOM20, Golgin97, CALR, EEA1]
+  outputs_dir: archetypes/      # under data_output_dir
+  reports_dir: archetypes/      # under local_output_dir
+  params: [[30, 10]]            # gamma and k.knn pairs
+  # selected_params: [30, 10]   # the pair selectk and weights use; by default the first
+  # npc: {TOM20: 14}            # by default the elbow of the variance curve
+  # k: {TOM20: 12}              # by default the knee of the recovery curve
+  coverage_sample_size: 12000
+  eval_sample_size: 8000
+  fit_sample_size: 12000
+  image_channels: {TOM20: 8, Golgin97: 9}  # position among the image channels, from 0
+  top_cells: 10
+  # display_percentiles: {TOM20: [0, 99.9]}  # by default 0 and 99.5
+  # display_ranges: {TOM20: {A1: [105, 4000]}}
+  parallel_channels: 1
+```
+
+Where a key has a default, the value shown is the default and that of the published analysis. `channels` are the channels analysed; `all_channels`, every channel in the feature table, is required by `pca`: a channel's features are those that name no other channel, so a channel left out of the list keeps its features in every other channel's space. `display_percentiles` sets, per channel, the pixel percentiles between which the stain is shown, and `display_ranges` fixes the range for particular wells. The stage also reads `schema`, the guide-filtered cell table from [Preprocessing](preprocessing.md), and, for `crops`, the combined objects table and the image locations.
 
 ## Outputs
 
@@ -62,30 +98,6 @@ archetypes:
 
 `chart effects` does not test them, and since all tests are corrected together, removing one also changes the q-values of the rest; `chart annotation` does not describe them. The numbering belongs to one fit: changing K, `npc` or the selected parameter pair renumbers the archetypes, and the list has to be made again.
 
-## Configuration
-
-```yaml
-archetypes:
-  channels: [TOM20, Golgin97]
-  all_channels: [DAPI1, TOM20, Golgin97, CALR, EEA1]
-  outputs_dir: archetypes/      # under data_output_dir
-  reports_dir: archetypes/      # under local_output_dir
-  params: [[30, 10]]            # gamma and k.knn pairs
-  # selected_params: [30, 10]   # the pair selectk and weights use; by default the first
-  # npc: {TOM20: 14}            # by default the elbow of the variance curve
-  # k: {TOM20: 12}              # by default the knee of the recovery curve
-  coverage_sample_size: 12000
-  eval_sample_size: 8000
-  fit_sample_size: 12000
-  image_channels: {TOM20: 8, Golgin97: 9}  # position among the image channels, from 0
-  top_cells: 10
-  # display_percentiles: {TOM20: [0, 99.9]}  # by default 0 and 99.5
-  # display_ranges: {TOM20: {A1: [105, 4000]}}
-  parallel_channels: 1
-```
-
-Where a key has a default, the value shown is the default and that of the published analysis. `channels` are the channels analysed; `all_channels`, every channel in the feature table, is required by `pca`: a channel's features are those that name no other channel, so a channel left out of the list keeps its features in every other channel's space. `display_percentiles` sets, per channel, the pixel percentiles between which the stain is shown, and `display_ranges` fixes the range for particular wells. The stage also reads `schema`, the guide-filtered cell table from [Preprocessing](preprocessing.md), and, for `crops`, the combined objects table and the image locations.
-
 ## Method
 
 **Channel space.** A channel's features are the columns of the guide-filtered cell table that name no other channel in `all_channels` and measure no shape. They are standardised, reduced to the principal components covering 90% of the variance, and centred on the centroid of the control cells.
@@ -106,7 +118,7 @@ Where a key has a default, the value shown is the default and that of the publis
 
 | Message | Cause and remedy |
 |---|---|
-| `Rscript is not on PATH ...` or `R cannot load ...` | Activate the R environment described under [Installation](installation.md) |
+| `Rscript is not on PATH ...` or `R cannot load ...` | Activate the environment described under [Installation](installation.md) |
 | `The pca step needs every channel the feature table holds ...` | Set `archetypes.all_channels` |
 | `None of the ... columns belong to ... alone ...` | Every feature names another channel or measures a shape; check the channel names against the feature names |
 | `There are only ... metacells, so every fit uses all of them ...` (warning) | The fits differ only in their starts; lower `coverage_sample_size` and `fit_sample_size` to about 40% of the metacells |
@@ -114,6 +126,6 @@ Where a key has a default, the value shown is the default and that of the publis
 | `'archetypes.npc' gives ... but its npc.txt holds ...` | The weights were built with another `npc`; rerun from the `npc` step |
 | `No K given and no k.txt in ...` or `No npc.txt ...` | Run the `selectk` or `npc` step first, or set `archetypes.k` |
 | `The process running ... stopped before it finished ...` | Usually out of memory; lower `parallel_channels` |
-| `Skipping the crops for ...: ...` (warning) | `archetypes.image_channels` lacks the channel, or scallops is not installed |
+| `Skipping the crops for ...: ...` (warning) | `archetypes.image_channels` lacks the channel, or SCALLOPS is not installed |
 | `No '...' is configured for well ... under 'preprocessing_bywell' ...` | Set `pheno_dir`, `cell_labels_dir` and `nuclei_labels_dir`, described under [Your data](data.md) |
 | `... cells shown for ... have no outline in the cell label image ...` (warning) | The label images are not the segmentation the objects table came from, or `cell_column` does not hold the label values |
