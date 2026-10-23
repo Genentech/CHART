@@ -104,6 +104,16 @@ individually with `--well` and channels with `--channel`, and use
 `chart archetypes --dry-run` prints every command the stage would run
 without running any of them.
 
+`chart archetypes` runs one channel at a time.
+`archetypes.parallel_channels`, or `--parallel-channels`, runs several
+at once, each in its own process and logging to
+`archetypes/<channel>/` under `local_output_dir`; the screen says when
+each starts and ends. Memory sets how many fit, not cores: the metacells
+step needed about 62 GB for one channel of 875,000 cells, and uses one
+core. The other stages use every core the run may use, which under SLURM
+is the job's share. `n_jobs` at the top of the config, or `--n-jobs`,
+sets a number instead.
+
 ## Configuration
 
 Every step reads one YAML file, given with `--config`:

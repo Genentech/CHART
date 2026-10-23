@@ -11,6 +11,7 @@ together with their defaults.
 
 import json
 import logging
+import os
 import re
 import yaml
 from dataclasses import dataclass, field, fields, replace
@@ -159,8 +160,8 @@ _CROPS_KEYS = ('image_channels', 'top_cells', 'display_percentiles',
 _ARCHETYPES_KEYS = frozenset({'outputs_dir', 'reports_dir', 'features_dir',
                               'features_file', 'channels', 'all_channels',
                               'params', 'selected_params', 'npc', 'k',
-                              'archetypes_to_remove', *_SAMPLE_SIZE_KEYS,
-                              *_CROPS_KEYS})
+                              'archetypes_to_remove', 'parallel_channels',
+                              *_SAMPLE_SIZE_KEYS, *_CROPS_KEYS})
 
 EFFECTS_SECTION = 'effects'
 
@@ -168,7 +169,7 @@ ANNOTATION_SECTION = 'annotation'
 
 PROGRAMS_SECTION = 'programs'
 
-_TOP_LEVEL_KEYS = frozenset({'data_output_dir', 'local_output_dir',
+_TOP_LEVEL_KEYS = frozenset({'data_output_dir', 'local_output_dir', 'n_jobs',
                              SECTION_NAME, ALLWELLS_SECTION, GUIDE_SECTION,
                              SCHEMA_SECTION, ARCHETYPES_SECTION,
                              EFFECTS_SECTION, ANNOTATION_SECTION,
@@ -405,6 +406,9 @@ class AllwellsConfig:
     missing_value_threshold: int = 100000
     rcv_threshold: float = 0.01
 
+    #: Threads for the normalisation, from the top-level ``n_jobs``.
+    n_jobs: int = -1
+
     schema: SchemaConfig = field(default_factory=SchemaConfig)
 
     # Bulk data goes to data_output_dir; plots and filter lists stay local,
@@ -445,6 +449,9 @@ class GuideConfig:
 
     cosine_similarity_threshold: float = 0.2
     min_cells_per_guide: int = 50
+
+    #: Workers for the local outlier factor, from the top-level ``n_jobs``.
+    n_jobs: int = -1
 
     schema: SchemaConfig = field(default_factory=SchemaConfig)
 
@@ -541,6 +548,10 @@ class ArchetypesConfig:
     #: percentiles for those wells.
     display_ranges: Dict[str, Dict[str, List[float]]] = field(
         default_factory=dict)
+    #: How many channels run at once, each in its own process.  Memory
+    #: limits it rather than cores: the metacells step needed about 62 GB
+    #: for one channel of the published screen's 875,000 cells.
+    parallel_channels: int = 1
 
     schema: SchemaConfig = field(default_factory=SchemaConfig)
 
@@ -618,7 +629,8 @@ class EffectsConfig:
     n_perm: int = 1000
     trimmed_alpha: float = 0.02
     seed: int = 42
-    #: Worker processes; -1 uses every core.
+    #: Worker processes; -1 uses every core the run may use.  Left out of
+    #: the section, the top-level ``n_jobs`` is used.
     n_jobs: int = -1
 
     schema: SchemaConfig = field(default_factory=SchemaConfig)
@@ -671,6 +683,8 @@ class ProgramsConfig:
     qval_threshold: float = 0.01
     n_modules: int = 25
     seed: int = 42
+    #: Workers for the sparse PCA, from the top-level ``n_jobs``.
+    n_jobs: int = -1
 
     @property
     def outputs_path(self) -> str:
@@ -695,7 +709,7 @@ _EFFECTS_KEYS = frozenset(f.name for f in fields(EffectsConfig)) - {
 _ANNOTATION_KEYS = frozenset(f.name for f in fields(AnnotationConfig)) - {
     'local_output_dir'}
 _PROGRAMS_KEYS = frozenset(f.name for f in fields(ProgramsConfig)) - {
-    'data_output_dir', 'local_output_dir'}
+    'data_output_dir', 'local_output_dir', 'n_jobs'}
 _WELL_KEYS = frozenset(f.name for f in fields(WellConfig)) - {'well'}
 _SCHEMA_KEYS = frozenset(f.name for f in fields(SchemaConfig))
 
@@ -720,6 +734,34 @@ def _as_count(value: Any, key: str, where: str) -> int:
         raise ValueError(f"Config key '{key}' in {where} must be a whole "
                          f"number of at least 1, got {value!r}")
     return value
+
+
+def _as_n_jobs(value: Any, where: str) -> int:
+    if (isinstance(value, bool) or not isinstance(value, int)
+            or (value != -1 and value < 1)):
+        raise ValueError(f"Config key 'n_jobs' in {where} must be -1, for "
+                         f"every core, or a whole number of at least 1, got "
+                         f"{value!r}")
+    return value
+
+
+def _top_level_n_jobs(config: Dict[str, Any]) -> int:
+    return _as_n_jobs(config.get('n_jobs', -1), 'the top level')
+
+
+def resolve_n_jobs(n_jobs: int) -> int:
+    """How many workers *n_jobs* asks for.
+
+    -1 counts the cores this process may run on, which under SLURM are
+    the job's rather than the whole machine's.
+    """
+    if n_jobs != -1:
+        return n_jobs
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        # macOS has no affinity call.
+        return os.cpu_count() or 1
 
 
 def _build_thresholds(section: Dict[str, Any], config: Dict[str, Any]) -> Thresholds:
@@ -844,6 +886,7 @@ def load_allwells_config(source: Union[str, Dict[str, Any], AllwellsConfig]) -> 
 
     return AllwellsConfig(data_output_dir=config.get('data_output_dir', ''),
                           local_output_dir=config.get('local_output_dir', ''),
+                          n_jobs=_top_level_n_jobs(config),
                           schema=_build_schema(config),
                           **{k: v for k, v in section.items() if k in _ALLWELLS_KEYS})
 
@@ -872,6 +915,7 @@ def load_guide_config(source: Union[str, Dict[str, Any], GuideConfig]) -> GuideC
 
     return GuideConfig(data_output_dir=config.get('data_output_dir', ''),
                        local_output_dir=config.get('local_output_dir', ''),
+                       n_jobs=_top_level_n_jobs(config),
                        schema=_build_schema(config),
                        **{k: v for k, v in section.items() if k in _GUIDE_KEYS})
 
@@ -953,6 +997,9 @@ def load_archetypes_config(
             category: list(names or []) for category, names in removal.items()}
     if 'top_cells' in settings:
         _as_count(settings['top_cells'], 'top_cells', ARCHETYPES_SECTION)
+    if 'parallel_channels' in settings:
+        _as_count(settings['parallel_channels'], 'parallel_channels',
+                  ARCHETYPES_SECTION)
     for key in ('image_channels', 'display_percentiles', 'display_ranges'):
         if key in settings:
             if not isinstance(settings[key] or {}, dict):
@@ -1004,10 +1051,13 @@ def load_effects_config(
     else:
         _warn_unknown(section, _EFFECTS_KEYS, frozenset(), EFFECTS_SECTION)
 
+    settings = {k: v for k, v in section.items() if k in _EFFECTS_KEYS}
+    settings['n_jobs'] = (_as_n_jobs(settings['n_jobs'], EFFECTS_SECTION)
+                          if 'n_jobs' in settings else _top_level_n_jobs(config))
     return EffectsConfig(data_output_dir=config.get('data_output_dir', ''),
                          local_output_dir=config.get('local_output_dir', ''),
                          schema=_build_schema(config),
-                         **{k: v for k, v in section.items() if k in _EFFECTS_KEYS})
+                         **settings)
 
 
 def load_annotation_config(
@@ -1062,6 +1112,7 @@ def load_programs_config(
 
     return ProgramsConfig(data_output_dir=config.get('data_output_dir', ''),
                           local_output_dir=config.get('local_output_dir', ''),
+                          n_jobs=_top_level_n_jobs(config),
                           **{k: v for k, v in section.items() if k in _PROGRAMS_KEYS})
 
 

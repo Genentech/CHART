@@ -194,7 +194,7 @@ def run_guide_filtering(allwells: AllwellsConfig,
 
     control_result, control_guides = _run_controls(
         guide_data, min_methods=min_methods, save_plots=save_plots,
-        plot_dir=plot_dir, schema=guides.schema)
+        plot_dir=plot_dir, schema=guides.schema, n_jobs=guides.n_jobs)
     result.controls = control_result.controls
     result.control_outliers = len(control_guides)
 
@@ -215,7 +215,7 @@ def run_guide_filtering(allwells: AllwellsConfig,
 
 def _run_controls(guide_data: pd.DataFrame, min_methods: int,
                   save_plots: bool, plot_dir: str,
-                  schema: Optional[SchemaConfig] = None):
+                  schema: Optional[SchemaConfig] = None, n_jobs: int = -1):
     """Phase one: the control guides that do not behave like controls."""
     controls = subset_controls(guide_data, schema)
 
@@ -225,7 +225,8 @@ def _run_controls(guide_data: pd.DataFrame, min_methods: int,
     controls_pca = _truncate_for_envelope(pca.loc[controls.index])
 
     control_result = find_outlier_controls(controls, controls_pca,
-                                           min_methods=min_methods)
+                                           min_methods=min_methods,
+                                           n_jobs=n_jobs)
 
     if save_plots:
         labels = controls.index.to_frame(index=False)

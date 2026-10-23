@@ -7,8 +7,8 @@ Once every channel has its table, their p-values are corrected together.
 
 import json
 import logging
-import os
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import replace
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
@@ -20,7 +20,7 @@ from ..dimred.channels import INDEX_COLUMNS
 from ..dimred.pca import NoControlsError, control_mask
 from ..io.config import (ARCHETYPES_SECTION, ArchetypesConfig, EffectsConfig,
                          SchemaConfig, join_path, load_archetypes_config,
-                         load_effects_config)
+                         load_effects_config, resolve_n_jobs)
 from ..io.tables import load_table, save_table, table_exists, table_path
 
 logger = logging.getLogger(__name__)
@@ -227,7 +227,7 @@ def gene_effects(weights: pd.DataFrame, channel: str,
     Z = clr_transform(weights[columns].to_numpy(dtype=np.float64))
 
     test_genes = np.unique(genes[~controls])
-    n_jobs = os.cpu_count() if params.n_jobs == -1 else params.n_jobs
+    n_jobs = resolve_n_jobs(params.n_jobs)
     logger.info(f"{channel}: testing {len(test_genes)} genes on "
                 f"{len(positions)} of {len(archetypes)} archetypes, "
                 f"{params.n_perm} permutations, {n_jobs} workers")
@@ -348,7 +348,8 @@ def pool_effects(archetypes: ArchetypesConfig, effects: EffectsConfig,
 
 def run_effects(config: Union[str, Dict[str, Any]],
                 channels: Optional[Sequence[str]] = None,
-                continue_on_error: bool = False) -> Dict[str, Optional[str]]:
+                continue_on_error: bool = False,
+                n_jobs: Optional[int] = None) -> Dict[str, Optional[str]]:
     """Test each channel's archetype weights, then correct every channel's
     p-values together.
 
@@ -357,12 +358,15 @@ def run_effects(config: Union[str, Dict[str, Any]],
                 and removal list come from its archetypes section
         channels: Channels to run; ``None`` runs every channel in the config
         continue_on_error: Log and carry on when a channel fails
+        n_jobs: Worker processes, in place of the configured ones
 
     Returns:
         Each channel's effects table, or ``None`` where it failed.
     """
     archetypes = load_archetypes_config(config)
     effects = load_effects_config(config)
+    if n_jobs is not None:
+        effects = replace(effects, n_jobs=n_jobs)
     channels = list(channels) if channels else list(archetypes.channels)
     if not channels:
         raise ValueError(f"No channels to run: name them with --channel or "

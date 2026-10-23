@@ -8,6 +8,8 @@ them, so none of this needs R installed.  The crops step is CHART's own,
 and runs here on small made-up images in place of what scallops reads.
 """
 
+import multiprocessing
+import os
 import re
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +18,7 @@ from unittest import mock
 import numpy as np
 import pandas as pd
 import pytest
+from threadpoolctl import threadpool_info
 
 import chart.archetypes
 from chart.archetypes import (ENV_DIR, ENV_REPORTS, R_PACKAGES, SCRIPTS,
@@ -258,6 +261,107 @@ def test_the_crops_step_alone_asks_nothing_of_r():
         with mock.patch.object(workflow, '_run_crops'):
             run_archetypes(config(), channels=[CHANNEL], steps=['crops'])
     checked.assert_not_called()
+
+
+def fake_r(tmp_path, monkeypatch, failing=(), slow=()):
+    """An Rscript on PATH that says which script it ran for which channel,
+    after a pause for the channels in *slow*, and fails for those in
+    *failing*."""
+    bin_dir = tmp_path / 'bin'
+    bin_dir.mkdir()
+    rscript = bin_dir / 'Rscript'
+    rscript.write_text(
+        '#!/bin/sh\n'
+        '[ "$1" = "-e" ] && exit 0\n'
+        'channel=$(basename "$CHART_ARCHETYPE_DIR")\n'
+        f'case " {" ".join(slow)} " in *" $channel "*) sleep 2;; esac\n'
+        'echo "ran $(basename "$1") for $channel"\n'
+        f'case " {" ".join(failing)} " in *" $channel "*) exit 3;; esac\n')
+    rscript.chmod(0o755)
+    monkeypatch.setenv('PATH', f'{bin_dir}{os.pathsep}{os.environ["PATH"]}')
+
+
+def run_config(tmp_path, channels, **overrides):
+    return {'data_output_dir': str(tmp_path / 'data'),
+            'local_output_dir': str(tmp_path / 'reports'),
+            'archetypes': {'channels': channels, **overrides}}
+
+
+def channel_log(tmp_path, channel):
+    logs = list((tmp_path / 'reports' / 'archetypes' / channel)
+                .glob('archetypes_log_*.txt'))
+    return logs[0].read_text() if logs else None
+
+
+def test_one_channel_at_a_time_is_the_default():
+    assert load_archetypes_config(config()).parallel_channels == 1
+    with pytest.raises(ValueError, match='parallel_channels'):
+        load_archetypes_config(config(parallel_channels=0))
+
+
+def test_one_at_a_time_a_failing_step_stops_the_run(tmp_path, monkeypatch):
+    fake_r(tmp_path, monkeypatch, failing=['Golgin97'])
+    with pytest.raises(RuntimeError, match='npc step failed for channel Golgin97'):
+        run_archetypes(run_config(tmp_path, [CHANNEL, 'Golgin97', 'CALR']),
+                       steps=['npc'])
+
+
+def test_channels_run_at_once_each_logging_to_its_own_file(
+        tmp_path, monkeypatch, caplog):
+    fake_r(tmp_path, monkeypatch)
+    caplog.set_level('INFO')
+    planned = run_archetypes(run_config(tmp_path, [CHANNEL, 'Golgin97'],
+                                        parallel_channels=2),
+                             steps=['npc', 'evaluate'])
+    assert [result.returncode for result in planned] == [0] * 4
+    assert 'up to 2 channels at once' in caplog.text
+    for channel in (CHANNEL, 'Golgin97'):
+        ran = [line for line in channel_log(tmp_path, channel).splitlines()
+               if line.startswith('ran ')]
+        assert ran == [f'ran pick_npc.R for {channel}',
+                       f'ran eval_spaces_perchannel.R for {channel}']
+        assert f'{channel}: finished' in caplog.text
+
+
+def test_a_failing_channel_keeps_the_rest_from_starting(tmp_path, monkeypatch):
+    fake_r(tmp_path, monkeypatch, failing=['Golgin97'], slow=[CHANNEL])
+    with pytest.raises(RuntimeError,
+                       match='failed for Golgin97; CALR did not start'):
+        run_archetypes(run_config(tmp_path, ['Golgin97', CHANNEL, 'CALR'],
+                                  parallel_channels=2), steps=['npc'])
+    assert f'ran pick_npc.R for {CHANNEL}' in channel_log(tmp_path, CHANNEL)
+    assert channel_log(tmp_path, 'CALR') is None
+
+
+def test_with_continue_on_error_the_other_channels_carry_on(tmp_path, monkeypatch):
+    fake_r(tmp_path, monkeypatch, failing=['Golgin97'])
+    planned = run_archetypes(run_config(tmp_path, ['Golgin97', CHANNEL, 'CALR']),
+                             steps=['npc'], continue_on_error=True,
+                             parallel_channels=2)
+    assert ({result.channel: result.returncode for result in planned}
+            == {'Golgin97': 3, CHANNEL: 0, 'CALR': 0})
+
+
+@pytest.mark.skipif(multiprocessing.get_start_method() != 'fork',
+                    reason='the stand-in pca step reaches the workers only '
+                           'when they are forked')
+def test_channels_at_once_share_the_cores_between_them(tmp_path, monkeypatch):
+    # Left to themselves, each channel's maths libraries start a thread per
+    # core, and two channels' PCA ran six times slower side by side.
+    def pca_noting_threads(config, channel):
+        directory = Path(config.channel_path(channel))
+        directory.mkdir(parents=True)
+        (directory / 'threads.txt').write_text(
+            ' '.join(str(info['num_threads']) for info in threadpool_info()))
+
+    monkeypatch.setattr(workflow, '_run_pca', pca_noting_threads)
+    monkeypatch.setattr(workflow, 'resolve_n_jobs', lambda n_jobs: 8)
+    source = run_config(tmp_path, [CHANNEL, 'Golgin97'], parallel_channels=2)
+    run_archetypes(source, steps=['pca'])
+    resolved = load_archetypes_config(source)
+    for channel in (CHANNEL, 'Golgin97'):
+        threads = (Path(resolved.channel_path(channel)) / 'threads.txt').read_text()
+        assert set(threads.split()) == {'4'}, channel
 
 
 def test_the_published_number_of_cells_is_the_default():

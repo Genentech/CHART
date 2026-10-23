@@ -109,7 +109,8 @@ def run_normalization(config: Union[str, Dict[str, Any], AllwellsConfig],
         data = pd.read_parquet(temp_input_file)
         normalized = normalize(data,
                                feature_columns=list(feature_columns)
-                               if feature_columns else None)
+                               if feature_columns else None,
+                               n_jobs=config.n_jobs)
     finally:
         os.unlink(temp_input_file)
 

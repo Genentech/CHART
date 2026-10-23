@@ -17,9 +17,10 @@ from typing import List, Optional
 
 import numpy as np
 import pandas as pd
-from numba import njit, prange
+from numba import config as numba_config, njit, prange, set_num_threads
 
 from ..filtering.features import NoFeaturesError
+from ..io.config import resolve_n_jobs
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,8 @@ def normalize_group(group: np.ndarray, sorted_reference: np.ndarray,
 
 def normalize_across_wells(data: pd.DataFrame,
                            well_column: str = 'Well',
-                           feature_columns: Optional[List[str]] = None) -> pd.DataFrame:
+                           feature_columns: Optional[List[str]] = None,
+                           n_jobs: int = -1) -> pd.DataFrame:
     """Quantile normalise *data* well by well.
 
     Args:
@@ -134,6 +136,7 @@ def normalize_across_wells(data: pd.DataFrame,
                          the table to the features the schema declared;
                          pass this explicitly if the table carries
                          numeric identifiers that are not measurements.
+        n_jobs: Threads for the mapping; -1 for every core
 
     Returns:
         A table with the same index as *data*, holding the normalised
@@ -213,6 +216,9 @@ def normalize_across_wells(data: pd.DataFrame,
     if empty:
         logger.warning(f"{len(empty)} feature(s) have no values at all and "
                        f"cannot be normalised: {', '.join(map(str, empty))}")
+
+    # numba refuses more threads than it started with.
+    set_num_threads(min(resolve_n_jobs(n_jobs), numba_config.NUMBA_NUM_THREADS))
 
     # Results are written back into the original row positions rather than
     # concatenated per well, so the index keeps its order and its names.
