@@ -6,8 +6,9 @@ the programs.
 """
 
 import logging
+from dataclasses import replace
 from datetime import datetime
-from typing import Any, Dict, List, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import igraph as ig
 import leidenalg
@@ -75,9 +76,10 @@ def effect_matrix(pooled: pd.DataFrame, qval_threshold: float) -> pd.DataFrame:
     return matrix
 
 
-def fit_spca(X: np.ndarray, K: int, rs: int) -> Tuple[np.ndarray, np.ndarray]:
+def fit_spca(X: np.ndarray, K: int, rs: int,
+             n_jobs: int = -1) -> Tuple[np.ndarray, np.ndarray]:
     model = SparsePCA(n_components=K, random_state=rs, max_iter=SPCA_MAX_ITER,
-                      tol=SPCA_TOL, n_jobs=-1)
+                      tol=SPCA_TOL, n_jobs=n_jobs)
     S = model.fit_transform(X)
     return S, model.components_.T
 
@@ -92,11 +94,11 @@ def project(table: pd.DataFrame, loadings: pd.DataFrame) -> pd.DataFrame:
                         index=table.index, columns=loadings.columns)
 
 
-def fit_programs(matrix: pd.DataFrame, k: int,
-                 seed: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def fit_programs(matrix: pd.DataFrame, k: int, seed: int,
+                 n_jobs: int = -1) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """The programs' loadings on each archetype, each turned so that its
     largest loading is positive, and each gene's scores on them."""
-    _, L = fit_spca(matrix.to_numpy(), k, seed)
+    _, L = fit_spca(matrix.to_numpy(), k, seed, n_jobs)
     L[:, L[np.abs(L).argmax(axis=0), np.arange(k)] < 0] *= -1
     loadings = pd.DataFrame(L, index=matrix.columns, columns=program_names(k))
     return loadings, project(matrix, loadings)
@@ -147,7 +149,7 @@ def cluster_graph(S: np.ndarray, seed: int) -> List[np.ndarray]:
 
 
 def gene_modules(matrix: pd.DataFrame, loadings: pd.DataFrame, n_modules: int,
-                 seed: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
+                 seed: int, n_jobs: int = -1) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Group the genes by how often they cluster together when the programs
     are refitted on part of them.
 
@@ -167,7 +169,7 @@ def gene_modules(matrix: pd.DataFrame, loadings: pd.DataFrame, n_modules: int,
     for seed_idx in range(N_SEEDS):
         for sub_iter in range(RUNS_PER_SEED):
             idx = np.sort(rng.choice(n_pert, size=n_sub, replace=False))
-            S_sub, L_sub = fit_spca(X[idx], K, seed + seed_idx + sub_iter)
+            S_sub, L_sub = fit_spca(X[idx], K, seed + seed_idx + sub_iter, n_jobs)
             perm, signs = align_to_reference(L_sub, L_ref)
             S_aligned = S_sub[:, perm] * signs[np.newaxis, :]
 
@@ -284,7 +286,8 @@ def _save(table: pd.DataFrame, directory: str, name: str, **record: Any) -> str:
 
 
 def run_programs(config: Union[str, Dict[str, Any]],
-                 steps: Sequence[str] = ('all',)) -> Dict[str, str]:
+                 steps: Sequence[str] = ('all',),
+                 n_jobs: Optional[int] = None) -> Dict[str, str]:
     """Run the programs steps in order, each reading what the one before
     it wrote.
 
@@ -292,11 +295,14 @@ def run_programs(config: Union[str, Dict[str, Any]],
         config: A configuration file or mapping; the pooled effects, the
                 weights and the objects table come from its other sections
         steps: Which of :data:`STEPS` to run; ``('all',)`` runs them all
+        n_jobs: Workers for the sparse PCA, in place of the configured ones
 
     Returns:
         The main table each step wrote.
     """
     programs = load_programs_config(config)
+    if n_jobs is not None:
+        programs = replace(programs, n_jobs=n_jobs)
     wanted = STEPS if 'all' in steps else tuple(s for s in STEPS if s in steps)
     directory = programs.outputs_path
     outputs: Dict[str, str] = {}
@@ -314,7 +320,8 @@ def run_programs(config: Union[str, Dict[str, Any]],
     if 'fit' in wanted:
         matrix = _load(directory, MATRIX, 'run the matrix step')
         logger.info(f"Fitting {programs.k} programs")
-        loadings, scores = fit_programs(matrix, programs.k, programs.seed)
+        loadings, scores = fit_programs(matrix, programs.k, programs.seed,
+                                        programs.n_jobs)
         save_table(loadings, directory, LOADINGS)
         outputs['fit'] = _save(scores, directory, SCORES, k=programs.k,
                                seed=programs.seed)
@@ -328,7 +335,7 @@ def run_programs(config: Union[str, Dict[str, Any]],
             raise ValueError(f"The loadings in {directory} were fitted on "
                              f"another matrix; rerun the fit step")
         consensus, modules = gene_modules(matrix, loadings, programs.n_modules,
-                                          programs.seed)
+                                          programs.seed, programs.n_jobs)
         save_table(consensus, directory, CONSENSUS)
         outputs['modules'] = _save(modules, directory, MODULES,
                                    n_modules=programs.n_modules,

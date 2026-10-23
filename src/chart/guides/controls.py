@@ -105,13 +105,14 @@ def detect_isolation_forest(controls: pd.DataFrame,
 
 
 def detect_local_outlier_factor(controls_pca: pd.DataFrame,
-                                n_neighbors: int = N_NEIGHBORS) -> pd.Index:
+                                n_neighbors: int = N_NEIGHBORS,
+                                n_jobs: int = -1) -> pd.Index:
     """Flag controls whose local density is below their neighbours'."""
     if len(controls_pca) <= n_neighbors:
         logger.warning(f"Only {len(controls_pca)} control guides for "
                        f"n_neighbors={n_neighbors}; the neighbourhood is the "
                        f"whole set, so the factor is close to meaningless")
-    factor = LocalOutlierFactor(n_jobs=-1, n_neighbors=n_neighbors)
+    factor = LocalOutlierFactor(n_jobs=n_jobs, n_neighbors=n_neighbors)
     return controls_pca.index[factor.fit_predict(controls_pca) == -1]
 
 
@@ -155,7 +156,8 @@ def find_outlier_controls(controls: pd.DataFrame,
                           min_methods: int = MIN_METHODS,
                           n_estimators: int = N_ESTIMATORS,
                           random_state: int = RANDOM_STATE,
-                          n_neighbors: int = N_NEIGHBORS) -> ControlResult:
+                          n_neighbors: int = N_NEIGHBORS,
+                          n_jobs: int = -1) -> ControlResult:
     """Run the three detectors over the controls and take the vote.
 
     Args:
@@ -165,6 +167,7 @@ def find_outlier_controls(controls: pd.DataFrame,
         n_estimators: Trees in the isolation forest
         random_state: Seed for the isolation forest
         n_neighbors: Neighbourhood size for the local outlier factor
+        n_jobs: Workers for the local outlier factor; -1 for every core
 
     Returns:
         A :class:`ControlResult`.
@@ -174,7 +177,7 @@ def find_outlier_controls(controls: pd.DataFrame,
         (ISOLATION_FOREST, lambda: detect_isolation_forest(
             controls, n_estimators=n_estimators, random_state=random_state)),
         (LOCAL_OUTLIER_FACTOR, lambda: detect_local_outlier_factor(
-            controls_pca, n_neighbors=n_neighbors)),
+            controls_pca, n_neighbors=n_neighbors, n_jobs=n_jobs)),
         (ELLIPTIC_ENVELOPE, lambda: detect_elliptic_envelope(controls_pca)),
     )
 

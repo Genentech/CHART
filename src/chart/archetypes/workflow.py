@@ -13,17 +13,28 @@ Each script is told which directory to work in through the
 through :data:`ENV_REPORTS`.  Both are read with a fallback, so the
 scripts stay runnable by hand with ``export``, and their argument lists
 stay as they already are.
+
+Channels run one after another unless ``parallel_channels`` asks for more
+at once.  Each then runs its steps in order in a process of its own, and
+everything that process prints goes to a log file in its reports
+directory.
 """
 
 import logging
 import os
 import shutil
 import subprocess
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 
-from ..io.config import ARCHETYPES_SECTION, ArchetypesConfig, load_archetypes_config
+from threadpoolctl import threadpool_limits
+
+from ..io.config import (ARCHETYPES_SECTION, ArchetypesConfig,
+                         load_archetypes_config, resolve_n_jobs)
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +72,9 @@ SELECTED_PAIR = ('selectk', 'weights')
 #: them, so the whole set is asked for rather than a set per step.
 R_PACKAGES = ('SuperCell', 'archetypes', 'arrow', 'FNN', 'quadprog', 'clue',
               'dplyr', 'ggplot2')
+
+#: The command line's log format, which each channel's own log keeps.
+LOG_FORMAT = '%(asctime)s - %(levelname)s - %(message)s'
 
 
 @dataclass
@@ -212,12 +226,148 @@ def _planned(config: ArchetypesConfig, channels: Sequence[str],
     return planned
 
 
+def _run_step(result: StepResult,
+              source: Union[str, Dict[str, Any], ArchetypesConfig],
+              config: ArchetypesConfig, requested: bool,
+              continue_on_error: bool) -> None:
+    """Run one invocation, recording how it ended on *result*."""
+    if result.step in PYTHON_STEPS:
+        try:
+            if result.step == 'pca':
+                _run_pca(config, result.channel)
+            else:
+                _run_crops(source, config, result.channel, requested)
+        except Exception as error:
+            if not continue_on_error:
+                raise
+            result.returncode = 1
+            logger.error(f"The {result.step} step failed for channel "
+                         f"{result.channel}: {error}")
+            return
+        result.returncode = 0
+        return
+
+    completed = subprocess.run(result.command,
+                               env={**os.environ,
+                                    ENV_DIR: result.directory,
+                                    ENV_REPORTS: result.reports})
+    result.returncode = completed.returncode
+    if result.failed:
+        if not continue_on_error:
+            raise RuntimeError(
+                f"The {result.step} step failed for channel "
+                f"{result.channel} (exit {result.returncode}); its own "
+                f"output above says why")
+        logger.error(f"The {result.step} step failed for channel "
+                     f"{result.channel} (exit {result.returncode})")
+
+
+def _run_channel(results: List[StepResult],
+                 source: Union[str, Dict[str, Any], ArchetypesConfig],
+                 config: ArchetypesConfig, requested: bool,
+                 continue_on_error: bool, log: str, level: int,
+                 threads: int) -> List[StepResult]:
+    """Run one channel's invocations in order, in a worker process.
+
+    Everything the process prints goes to *log*, the R scripts' output
+    included, so that channels running side by side do not interleave.
+    The maths libraries the pca step calls are held to *threads* each,
+    as each would otherwise start one per core and the channels would
+    fight over them.
+    """
+    with open(log, 'a') as handle:
+        os.dup2(handle.fileno(), 1)
+        os.dup2(handle.fileno(), 2)
+    logging.basicConfig(level=level, format=LOG_FORMAT, force=True,
+                        handlers=[logging.FileHandler(log)])
+
+    # Loaded first, because the limit reaches only libraries already loaded.
+    from ..dimred import channels  # noqa: F401
+
+    with threadpool_limits(limits=threads):
+        for result in results:
+            logger.info(f"{result.step} [{result.channel}]: "
+                        f"{' '.join(result.command)}")
+            try:
+                _run_step(result, source, config, requested, continue_on_error)
+            except Exception:
+                logger.exception(f"The {result.step} step failed for channel "
+                                 f"{result.channel}")
+                if not result.failed:
+                    result.returncode = 1
+                break
+    return results
+
+
+def _run_parallel(planned: List[StepResult],
+                  source: Union[str, Dict[str, Any], ArchetypesConfig],
+                  config: ArchetypesConfig, requested: bool,
+                  continue_on_error: bool, workers: int) -> None:
+    """Run up to *workers* channels at once, each in its own process and
+    logging to its own file, and say when each starts and ends.
+
+    The cores the run may use are shared out evenly between the workers.
+    A channel that fails keeps the ones not yet started from starting,
+    unless *continue_on_error* is set; the ones running are let finish.
+    """
+    by_channel: Dict[str, List[StepResult]] = {}
+    for result in planned:
+        by_channel.setdefault(result.channel, []).append(result)
+    stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    level = logging.getLogger().getEffectiveLevel()
+    threads = max(1, resolve_n_jobs(-1) // workers)
+    waiting, running, failed = list(by_channel), {}, []
+
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        while running or waiting:
+            while (waiting and len(running) < workers
+                   and (continue_on_error or not failed)):
+                channel = waiting.pop(0)
+                log = (Path(config.report_path(channel))
+                       / f'archetypes_log_{stamp}.txt')
+                log.parent.mkdir(parents=True, exist_ok=True)
+                logger.info(f"{channel}: started, logging to {log}")
+                future = pool.submit(_run_channel, by_channel[channel], source,
+                                     config, requested, continue_on_error,
+                                     str(log), level, threads)
+                running[future] = channel, log
+            if not running:
+                break
+
+            done, _ = wait(running, return_when=FIRST_COMPLETED)
+            for future in done:
+                channel, log = running.pop(future)
+                try:
+                    returned = future.result()
+                except BrokenProcessPool as error:
+                    raise RuntimeError(
+                        f"The process running {channel} stopped before it "
+                        f"finished, which usually means the machine ran out "
+                        f"of memory; {log} shows how far it got") from error
+                for mine, theirs in zip(by_channel[channel], returned):
+                    mine.returncode = theirs.returncode
+                failure = next((r for r in by_channel[channel] if r.failed),
+                               None)
+                if failure is None:
+                    logger.info(f"{channel}: finished")
+                else:
+                    failed.append(channel)
+                    logger.error(f"{channel}: the {failure.step} step failed "
+                                 f"(exit {failure.returncode}); {log} says why")
+
+    if failed and not continue_on_error:
+        unstarted = f"; {', '.join(waiting)} did not start" if waiting else ''
+        raise RuntimeError(f"The archetype analysis failed for "
+                           f"{', '.join(failed)}{unstarted}")
+
+
 def run_archetypes(config: Union[str, Dict[str, Any], ArchetypesConfig],
                    channels: Optional[Sequence[str]] = None,
                    steps: Sequence[str] = ('all',),
                    scripts: Optional[str] = None,
                    dry_run: bool = False,
-                   continue_on_error: bool = False) -> List[StepResult]:
+                   continue_on_error: bool = False,
+                   parallel_channels: Optional[int] = None) -> List[StepResult]:
     """Run the archetype analysis steps.
 
     Args:
@@ -228,6 +378,8 @@ def run_archetypes(config: Union[str, Dict[str, Any], ArchetypesConfig],
         scripts: Where the R scripts are; ``None`` looks beside the package
         dry_run: Report the commands without running them
         continue_on_error: Log and carry on when a script fails
+        parallel_channels: How many channels to run at once, in place of
+                           the configured number
 
     Returns:
         One :class:`StepResult` per invocation, in the order planned.
@@ -249,42 +401,27 @@ def run_archetypes(config: Union[str, Dict[str, Any], ArchetypesConfig],
 
     logger.info(f"Archetypes: {len(planned)} invocations across "
                 f"{len(channels)} channels")
-    for result in planned:
-        logger.info(f"{result.step} [{result.channel}]: "
-                    f"{' '.join(result.command)}")
-        if dry_run:
-            continue
+    workers = (config.parallel_channels if parallel_channels is None
+               else parallel_channels)
+    if len(channels) > 1 and not dry_run:
+        pace = (f"up to {workers} channels at once" if workers > 1 else
+                f"one channel at a time; set "
+                f"'{ARCHETYPES_SECTION}.parallel_channels' or pass "
+                f"--parallel-channels to run more")
+        logger.info(f"Running {pace}. Each needs about 62 GB at the metacells "
+                    f"step for 875,000 cells, so memory sets how many fit.")
 
-        if result.step in PYTHON_STEPS:
-            try:
-                if result.step == 'pca':
-                    _run_pca(config, result.channel)
-                else:
-                    _run_crops(source, config, result.channel,
-                               'crops' in steps)
-            except Exception as error:
-                if not continue_on_error:
-                    raise
-                result.returncode = 1
-                logger.error(f"The {result.step} step failed for channel "
-                             f"{result.channel}: {error}")
+    if workers > 1 and len(channels) > 1 and not dry_run:
+        _run_parallel(planned, source, config, 'crops' in steps,
+                      continue_on_error, workers)
+    else:
+        for result in planned:
+            logger.info(f"{result.step} [{result.channel}]: "
+                        f"{' '.join(result.command)}")
+            if dry_run:
                 continue
-            result.returncode = 0
-            continue
-
-        completed = subprocess.run(result.command,
-                                   env={**os.environ,
-                                        ENV_DIR: result.directory,
-                                        ENV_REPORTS: result.reports})
-        result.returncode = completed.returncode
-        if result.failed:
-            if not continue_on_error:
-                raise RuntimeError(
-                    f"The {result.step} step failed for channel "
-                    f"{result.channel} (exit {result.returncode}); its own "
-                    f"output above says why")
-            logger.error(f"The {result.step} step failed for channel "
-                         f"{result.channel} (exit {result.returncode})")
+            _run_step(result, source, config, 'crops' in steps,
+                      continue_on_error)
 
     failed = [r for r in planned if r.failed]
     logger.info(f"Archetypes complete: {len(planned) - len(failed)}/"

@@ -23,6 +23,7 @@ dependencies = [
     "scikit-learn",
     "scipy",
     "seaborn",
+    "threadpoolctl",
 ]
 
 # pyarrow reads and writes every table; pandas does not pull it in itself.

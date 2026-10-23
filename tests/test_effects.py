@@ -6,7 +6,9 @@ that table laid out where the archetype stage leaves its weights.
 """
 
 import json
+import os
 from pathlib import Path
+from unittest import mock
 
 import numpy as np
 import pandas as pd
@@ -14,7 +16,10 @@ import pytest
 from scipy.stats import wasserstein_distance
 
 from chart.effects import COLUMNS, run_effects, workflow
-from chart.io.config import EffectsConfig, load_archetypes_config
+from chart.io.config import (EffectsConfig, load_allwells_config,
+                             load_archetypes_config, load_effects_config,
+                             load_guide_config, load_programs_config,
+                             resolve_n_jobs)
 
 CHANNEL = 'CALR'
 PARAMS = EffectsConfig(n_perm=20, n_jobs=1)
@@ -127,6 +132,35 @@ def test_a_channel_gets_a_table_and_a_record_of_how_it_was_made(tmp_path):
                                     'seed': 42}
     assert record['removed_archetypes'] == ['CALR_Archetype2']
     assert record['skipped_genes'] == ['GENEC']
+
+
+def test_the_top_level_n_jobs_reaches_every_stage_that_uses_cores():
+    for load in (load_allwells_config, load_guide_config, load_effects_config,
+                 load_programs_config):
+        assert load({'n_jobs': 3}).n_jobs == 3
+
+
+def test_an_n_jobs_under_effects_wins_over_the_top_level_one():
+    assert load_effects_config({'n_jobs': 3, 'effects': {'n_jobs': 2}}).n_jobs == 2
+
+
+def test_n_jobs_is_minus_one_or_a_count():
+    for value in (0, -2, 1.5, 'all', True):
+        with pytest.raises(ValueError, match="'n_jobs'"):
+            load_effects_config({'n_jobs': value})
+
+
+def test_minus_one_is_the_cores_the_run_may_use():
+    with mock.patch.object(os, 'sched_getaffinity', create=True,
+                           return_value={0, 5, 7}):
+        assert resolve_n_jobs(-1) == 3
+    assert resolve_n_jobs(4) == 4
+
+
+def test_n_jobs_given_to_the_run_wins_over_the_config(tmp_path, caplog):
+    caplog.set_level('INFO')
+    run_effects(with_weights(tmp_path), channels=[CHANNEL], n_jobs=2)
+    assert '2 workers' in caplog.text
 
 
 def test_a_channel_without_weights_stops_the_run(tmp_path):

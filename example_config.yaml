@@ -14,6 +14,11 @@
 data_output_dir: /path/to/bulk/outputs
 local_output_dir: /path/to/reports
 
+# How many cores the normalize and guides steps, 'chart effects' and
+# 'chart programs' use.  -1 is every core the run may use, which under
+# SLURM is the job's share.  --n-jobs overrides it.
+n_jobs: -1
+
 
 # Where each role lives in your tables, and what the values mean.  Tables
 # are not expected to use CHART's own column names.
@@ -201,6 +206,12 @@ archetypes:
   #   TOM20:
   #     A1: [105, 4000]
 
+  # How many channels run at once, each in its own process logging to
+  # reports_dir/<channel>/.  Memory limits it rather than cores: the
+  # metacells step needed about 62 GB for one channel of 875,000 cells.
+  # --parallel-channels overrides it.
+  # parallel_channels: 1
+
 
 # Read by 'chart annotation', which is optional.  The key comes from the
 # environment, never from this file.
@@ -226,14 +237,14 @@ annotation:
 # cells of every well the gene appears in, pooled, with a p-value per
 # archetype from shuffling the labels within each well, and writes
 # <channel>.parquet and <channel>.json under data_output_dir/outputs_dir/.
-# 1000 permutations is what the published run used.  n_jobs -1 uses every
-# core.
+# 1000 permutations is what the published run used.  An n_jobs here
+# overrides the top-level one for this stage.
 effects:
   outputs_dir: effects/
   n_perm: 1000
   trimmed_alpha: 0.02
   seed: 42
-  n_jobs: -1
+  # n_jobs: -1
 
 
 # Read by 'chart programs', which runs on effects/pooled.parquet.  It keeps

@@ -10,7 +10,7 @@ across-wells steps run once over the whole well list.
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 
 from .io.config import BywellConfig, PreprocessingConfig, load_preprocessing_config
@@ -252,7 +252,8 @@ def run_preprocessing(config: Union[str, Dict[str, Any], BywellConfig,
                       validate: bool = False,
                       save_plots: bool = True,
                       plots_dir: Optional[str] = None,
-                      continue_on_error: bool = False) -> PreprocessingResult:
+                      continue_on_error: bool = False,
+                      n_jobs: Optional[int] = None) -> PreprocessingResult:
     """Run the requested preprocessing steps.
 
     Args:
@@ -277,12 +278,18 @@ def run_preprocessing(config: Union[str, Dict[str, Any], BywellConfig,
         save_plots: Whether to write plots
         plots_dir: Where to write plots (default: ``{qc_dir}/plots``)
         continue_on_error: Log and carry on when a well fails
+        n_jobs: Cores for the normalize and guides steps, in place of the
+                configured ones
 
     Returns:
         A :class:`PreprocessingResult` holding the results of each step
         that ran.
     """
     config = load_preprocessing_config(config)
+    if n_jobs is not None:
+        config = replace(config,
+                         allwells=replace(config.allwells, n_jobs=n_jobs),
+                         guides=replace(config.guides, n_jobs=n_jobs))
     named_steps = 'all' not in steps
     steps = resolve_steps(steps)
 

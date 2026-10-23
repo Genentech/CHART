@@ -59,6 +59,28 @@ def setup_logging(log_dir: str, name: str, level: int = logging.INFO) -> str:
     return log_file
 
 
+def _n_jobs(text: str) -> int:
+    value = int(text)
+    if value != -1 and value < 1:
+        raise argparse.ArgumentTypeError(
+            f"must be -1, for every core, or at least 1; got {value}")
+    return value
+
+
+def _count(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"must be at least 1; got {value}")
+    return value
+
+
+def _add_n_jobs(parser: argparse.ArgumentParser, uses: str) -> None:
+    parser.add_argument('--n-jobs', type=_n_jobs, metavar='N',
+                        help=f'Cores for {uses}; -1 for every core the run '
+                             f'may use (default: n_jobs in the config, '
+                             f'or -1)')
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the ``chart`` argument parser."""
     parser = argparse.ArgumentParser(
@@ -142,6 +164,7 @@ def _add_preprocessing_parser(subcommands) -> None:
                         help='Directory to save plots (default: {qc_dir}/plots)')
     parser.add_argument('--continue-on-error', action='store_true',
                         help='Carry on when a well fails, instead of stopping')
+    _add_n_jobs(parser, 'the normalize and guides steps')
     parser.add_argument('--quiet', action='store_true',
                         help='Log warnings and errors only')
 
@@ -186,6 +209,12 @@ def _add_archetypes_parser(subcommands) -> None:
                              'needs no R installed')
     parser.add_argument('--continue-on-error', action='store_true',
                         help='Carry on when a step fails, instead of stopping')
+    parser.add_argument('--parallel-channels', type=_count, metavar='N',
+                        help='How many channels to run at once, each in its '
+                             'own process with its own log (default: '
+                             'archetypes.parallel_channels in the config, '
+                             'or 1). Each needs about 62 GB at the metacells '
+                             'step for 875,000 cells.')
     parser.add_argument('--quiet', action='store_true',
                         help='Log warnings and errors only')
 
@@ -205,7 +234,8 @@ def _archetypes_command(args: argparse.Namespace) -> int:
             steps=args.steps,
             scripts=args.scripts_dir,
             dry_run=args.dry_run,
-            continue_on_error=args.continue_on_error)
+            continue_on_error=args.continue_on_error,
+            parallel_channels=args.parallel_channels)
     except Exception as e:
         logger.error(f"Archetypes failed: {e}", exc_info=True)
         return 1
@@ -286,6 +316,7 @@ def _add_effects_parser(subcommands) -> None:
 
     parser.add_argument('--continue-on-error', action='store_true',
                         help='Carry on when a channel fails, instead of stopping')
+    _add_n_jobs(parser, 'the test, overriding effects.n_jobs too')
     parser.add_argument('--quiet', action='store_true',
                         help='Log warnings and errors only')
 
@@ -302,7 +333,8 @@ def _effects_command(args: argparse.Namespace) -> int:
         outputs = run_effects(
             args.config,
             channels=None if args.all_channels else args.channel,
-            continue_on_error=args.continue_on_error)
+            continue_on_error=args.continue_on_error,
+            n_jobs=args.n_jobs)
     except Exception as e:
         logger.error(f"Effects failed: {e}", exc_info=True)
         return 1
@@ -326,6 +358,7 @@ def _add_programs_parser(subcommands) -> None:
                         choices=('all',) + PROGRAM_STEPS,
                         default=['all'],
                         help='Steps to run (default: all)')
+    _add_n_jobs(parser, 'the sparse PCA')
     parser.add_argument('--quiet', action='store_true',
                         help='Log warnings and errors only')
 
@@ -339,7 +372,7 @@ def _programs_command(args: argparse.Namespace) -> int:
         format='%(asctime)s - %(levelname)s - %(message)s')
 
     try:
-        run_programs(args.config, steps=args.steps)
+        run_programs(args.config, steps=args.steps, n_jobs=args.n_jobs)
     except Exception as e:
         logger.error(f"Programs failed: {e}", exc_info=True)
         return 1
@@ -395,7 +428,8 @@ def _preprocessing_command(args: argparse.Namespace) -> int:
                                    validate=args.validate,
                                    save_plots=args.save_plots,
                                    plots_dir=args.plots_dir,
-                                   continue_on_error=args.continue_on_error)
+                                   continue_on_error=args.continue_on_error,
+                                   n_jobs=args.n_jobs)
     except Exception as e:
         logger.error(f"Preprocessing failed: {e}", exc_info=True)
         return 1
