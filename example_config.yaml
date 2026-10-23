@@ -202,6 +202,25 @@ archetypes:
   #     A1: [105, 4000]
 
 
+# Read by 'chart annotation', which is optional.  The key comes from the
+# environment, never from this file.
+annotation:
+  reports_dir: annotation/
+
+  # Each channel's normal archetypes, by number; every archetype is
+  # compared with them.
+  # normal_archetypes:
+  #   TOM20: [10]
+  #   FAK: [5, 8, 11]
+
+  model: gpt-5.5
+
+  # Summaries closer than this, in cosine distance, are contrasted with
+  # each other; max_pairs_per_archetype caps the pairs, 0 for no cap.
+  similarity_threshold: 0.08
+  max_pairs_per_archetype: 0
+
+
 # Read by 'chart effects', which runs on the weights the archetypes stage
 # left for each of its channels.  It tests each gene against the control
 # cells of every well the gene appears in, pooled, with a p-value per

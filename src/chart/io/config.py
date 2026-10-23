@@ -164,12 +164,15 @@ _ARCHETYPES_KEYS = frozenset({'outputs_dir', 'reports_dir', 'features_dir',
 
 EFFECTS_SECTION = 'effects'
 
+ANNOTATION_SECTION = 'annotation'
+
 PROGRAMS_SECTION = 'programs'
 
 _TOP_LEVEL_KEYS = frozenset({'data_output_dir', 'local_output_dir',
                              SECTION_NAME, ALLWELLS_SECTION, GUIDE_SECTION,
                              SCHEMA_SECTION, ARCHETYPES_SECTION,
-                             EFFECTS_SECTION, PROGRAMS_SECTION})
+                             EFFECTS_SECTION, ANNOTATION_SECTION,
+                             PROGRAMS_SECTION})
 _SECTION_KEYS = frozenset({'scallops_dir', 'merged_dir', 'filter_dir', 'qc_dir',
                            'filtered_output_dir', 'premerged',
                            'objects_pattern', 'features_pattern',
@@ -626,6 +629,33 @@ class EffectsConfig:
 
 
 @dataclass
+class AnnotationConfig:
+    """The archetype annotation, run on the crops the archetypes stage drew.
+
+    The channels, the crops and the archetypes to leave out are the
+    archetype stage's, so they are read from :class:`ArchetypesConfig`
+    rather than named here.
+    """
+    local_output_dir: str = ''
+    reports_dir: str = 'annotation/'
+
+    #: Each channel's normal archetypes, by number.
+    normal_archetypes: Dict[str, List[int]] = field(default_factory=dict)
+    model: str = 'gpt-5.5'
+    similarity_threshold: float = 0.08
+    #: 0 contrasts every pair under the threshold.
+    max_pairs_per_archetype: int = 0
+
+    @property
+    def reports_path(self) -> str:
+        return join_path(self.local_output_dir, self.reports_dir)
+
+    def channel_path(self, channel: str) -> str:
+        """The directory *channel*'s steps read from and write to."""
+        return join_path(self.reports_path, channel)
+
+
+@dataclass
 class ProgramsConfig:
     """The programs: archetypes that move together across genes, the
     genes' modules, and each cell's scores.
@@ -662,6 +692,8 @@ class PreprocessingConfig:
 _THRESHOLD_KEYS = frozenset(f.name for f in fields(Thresholds))
 _EFFECTS_KEYS = frozenset(f.name for f in fields(EffectsConfig)) - {
     'data_output_dir', 'local_output_dir', 'schema'}
+_ANNOTATION_KEYS = frozenset(f.name for f in fields(AnnotationConfig)) - {
+    'local_output_dir'}
 _PROGRAMS_KEYS = frozenset(f.name for f in fields(ProgramsConfig)) - {
     'data_output_dir', 'local_output_dir'}
 _WELL_KEYS = frozenset(f.name for f in fields(WellConfig)) - {'well'}
@@ -976,6 +1008,33 @@ def load_effects_config(
                          local_output_dir=config.get('local_output_dir', ''),
                          schema=_build_schema(config),
                          **{k: v for k, v in section.items() if k in _EFFECTS_KEYS})
+
+
+def load_annotation_config(
+        source: Union[str, Dict[str, Any], AnnotationConfig]) -> AnnotationConfig:
+    """Build an :class:`AnnotationConfig` from a file path or a mapping.
+
+    Only the annotation section is checked here, for the same reason as
+    :func:`load_allwells_config`.
+    """
+    if isinstance(source, AnnotationConfig):
+        return source
+
+    config = load_config_from_file(source) if isinstance(source, str) else source
+    if not isinstance(config, dict):
+        raise ValueError(f"Configuration must be a mapping, got {type(config).__name__}")
+
+    section = config.get(ANNOTATION_SECTION)
+    if section is None:
+        section = {}
+    elif not isinstance(section, dict):
+        raise ValueError(f"'{ANNOTATION_SECTION}' is present but holds no settings; "
+                         f"remove it or fill it in")
+    else:
+        _warn_unknown(section, _ANNOTATION_KEYS, frozenset(), ANNOTATION_SECTION)
+
+    return AnnotationConfig(local_output_dir=config.get('local_output_dir', ''),
+                            **{k: v for k, v in section.items() if k in _ANNOTATION_KEYS})
 
 
 def load_programs_config(
