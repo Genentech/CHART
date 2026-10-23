@@ -11,12 +11,17 @@
 - **Automated archetype annotation** — contrastive image analysis and standardized reports generated with multimodal language models and user review.
 - **Morphological program definition** — integration of co-regulated archetypes into interpretable programs of coordinated cellular change.
 
-## Requirements
+## Documentation
 
-Most of CHART is Python and arrives with the package. The archetype
-analysis is the exception: every step of it but the first and last is an
-R script that `chart archetypes` runs through `Rscript`, so that stage
-needs R and eight R packages. `environment.yml` describes them:
+The [documentation](https://genentech.github.io/CHART/) describes the input data, each stage's usage, outputs and method, the configuration, and running on a cluster.
+
+## Installation
+
+```
+pip install .
+```
+
+The archetype analysis also needs R and the packages in `environment.yml`:
 
 ```
 mamba env create -f environment.yml
@@ -24,24 +29,9 @@ conda activate chart-r
 Rscript -e 'install.packages("archetypes", repos="https://cloud.r-project.org")'
 ```
 
-The archetype annotation is optional. It needs two more packages and a key
-for the language model, read from the environment:
-
-```
-pip install ".[annotation]"
-export OPENAI_API_KEY="sk-..."
-```
-
-`src/chart/annotation/llm.py` lists the gateway and Azure alternatives.
+The optional annotation stage needs `pip install ".[annotation]"` and credentials for a language model in the environment. [Installation](https://genentech.github.io/CHART/installation.html) covers these, scallops for reading images, and remote storage.
 
 ## Quickstart
-
-Install the package, plus the environment above if you want the archetype
-analysis:
-
-```
-pip install .
-```
 
 Write a config saying where the input is and where output should go:
 
@@ -67,86 +57,4 @@ chart effects --config my_screen.yaml --all-channels
 chart programs --config my_screen.yaml
 ```
 
-`chart effects` tests each gene against the controls on every archetype
-of the weights `chart archetypes` left, and writes one table per channel
-to `effects/` under `data_output_dir`. Once every channel in
-`archetypes.channels` has its table, it corrects all their p-values
-together and writes them, with q-values, to `effects/pooled.parquet`.
-
-`chart programs` finds programs, sets of archetypes that genes move
-together, by sparse PCA on the genes and archetypes in
-`effects/pooled.parquet` with any q-value below 0.01. It writes to
-`programs/` under `data_output_dir`: each program's loadings and each
-gene's scores; the genes' modules, from how often they cluster together
-across 150 refits on part of them, which takes about 25 minutes; and every
-cell's scores, with 20 example cells per program. `--steps` runs only some
-of `matrix`, `fit`, `modules` and `cells`. `examples/programs.ipynb` shows
-what each table holds and how to read them; Jupyter is not installed with
-CHART.
-
-The last step of `chart archetypes`, `crops`, draws each archetype's most
-heavily weighted cells from the images, five to a PNG, under
-`archetypes/<channel>/crops/` in `local_output_dir`. It reads the images
-through scallops, from the locations under `preprocessing_bywell`. A
-channel that `archetypes.image_channels` does not list, or a machine
-without scallops, gets a warning and no crops, or an error if the step
-was asked for with `--steps crops`; `example_config.yaml` lists its
-settings.
-
-`chart annotation` describes each archetype from those crops with a
-language model, leaving out the archetypes `archetypes_to_remove` lists,
-and writes the reports and a dashboard to `annotation/<channel>/` under
-`local_output_dir`. Nothing downstream reads them.
-
-Wells are read off the input filenames. Name wells
-individually with `--well` and channels with `--channel`, and use
-`--steps` on every stage but `chart effects` to run only part of a pipeline.
-`chart archetypes --dry-run` prints every command the stage would run
-without running any of them.
-
-`chart archetypes` runs one channel at a time.
-`archetypes.parallel_channels`, or `--parallel-channels`, runs several
-at once, each in its own process and logging to
-`archetypes/<channel>/` under `local_output_dir`; the screen says when
-each starts and ends. Memory sets how many fit, not cores: the metacells
-step needed about 62 GB for one channel of 875,000 cells, and uses one
-core. The other stages use every core the run may use, which under SLURM
-is the job's share. `n_jobs` at the top of the config, or `--n-jobs`,
-sets a number instead.
-
-## Configuration
-
-Every step reads one YAML file, given with `--config`:
-
-```
-chart preprocessing --config my_screen.yaml --all-wells
-```
-
-Use `example_config.yaml` as a starting point: copy it and edit the paths. Every key in it except the two output directories is optional, and the values shown are the defaults.
-
-The `schema` block maps CHART variables to the input screen, accounting for differences in input column names and feature naming conventions:
-
-```yaml
-schema:
-  cell_column: object_number
-  guide_column: sgrna_id
-  gene_column: target_gene
-  feature_patterns: ['^Nuclei_', '^Cells_', '^Cytoplasm_']
-  control_gene: safe_harbour
-  control_prefix: null
-  centroid_columns: [Nuclei_Location_Center_Y, Nuclei_Location_Center_X]
-```
-
-Every column in `feature_patterns` must be numeric.
-
-Input filenames are configurable in the same file, under
-`preprocessing_bywell`. Only `.parquet` input files are accepted.
-
-```yaml
-preprocessing_bywell:
-  objects_pattern: 'plate1_{well}.objects.parquet'
-  features_pattern: 'plate1_{well}.features.parquet'
-```
-
-When one file per well holds objects and features together, set  
-`premerged: true` and name it with `merged_pattern` instead.
+Before `chart effects`, inspect each archetype's crops under `archetypes/<channel>/crops/` in `local_output_dir`, and list those reflecting segmentation errors or staining artefacts under `archetypes.archetypes_to_remove`, as described in [Curating archetypes](https://genentech.github.io/CHART/archetypes.html#curating-archetypes). `example_config.yaml` lists every setting, and [Configuration](https://genentech.github.io/CHART/configuration.html) explains which matter most.
