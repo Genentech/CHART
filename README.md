@@ -57,13 +57,14 @@ archetypes:
   all_channels: [DAPI1, TOM20, Golgin97]   # every channel the table holds
 ```
 
-Then run the three stages in order:
+Then run the five stages in order:
 
 ```
 chart preprocessing --config my_screen.yaml --all-wells
 chart archetypes --config my_screen.yaml --all-channels
 chart annotation --config my_screen.yaml --all-channels   # optional
 chart effects --config my_screen.yaml --all-channels
+chart programs --config my_screen.yaml
 ```
 
 `chart effects` tests each gene against the controls on every archetype
@@ -71,6 +72,17 @@ of the weights `chart archetypes` left, and writes one table per channel
 to `effects/` under `data_output_dir`. Once every channel in
 `archetypes.channels` has its table, it corrects all their p-values
 together and writes them, with q-values, to `effects/pooled.parquet`.
+
+`chart programs` finds programs, sets of archetypes that genes move
+together, by sparse PCA on the genes and archetypes in
+`effects/pooled.parquet` with any q-value below 0.01. It writes to
+`programs/` under `data_output_dir`: each program's loadings and each
+gene's scores; the genes' modules, from how often they cluster together
+across 150 refits on part of them, which takes about 25 minutes; and every
+cell's scores, with 20 example cells per program. `--steps` runs only some
+of `matrix`, `fit`, `modules` and `cells`. `examples/programs.ipynb` shows
+what each table holds and how to read them; Jupyter is not installed with
+CHART.
 
 The last step of `chart archetypes`, `crops`, draws each archetype's most
 heavily weighted cells from the images, five to a PNG, under
@@ -88,7 +100,7 @@ and writes the reports and a dashboard to `annotation/<channel>/` under
 
 Wells are read off the input filenames. Name wells
 individually with `--well` and channels with `--channel`, and use
-`--steps` on the first three to run only part of a pipeline.
+`--steps` on every stage but `chart effects` to run only part of a pipeline.
 `chart archetypes --dry-run` prints every command the stage would run
 without running any of them.
 

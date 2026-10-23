@@ -21,6 +21,7 @@ from .combining import METHODS as AGGREGATION_METHODS
 from .filtering import TARGETS
 from .outliers import PREFILTERS
 from .preprocessing import STEPS, run_preprocessing
+from .programs import STEPS as PROGRAM_STEPS, run_programs
 from .qc import COMPONENTS
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_archetypes_parser(subcommands)
     _add_annotation_parser(subcommands)
     _add_effects_parser(subcommands)
+    _add_programs_parser(subcommands)
     return parser
 
 
@@ -306,6 +308,43 @@ def _effects_command(args: argparse.Namespace) -> int:
         return 1
 
     return 1 if None in outputs.values() else 0
+
+
+def _add_programs_parser(subcommands) -> None:
+    """Add the ``chart programs`` subcommand."""
+    parser = subcommands.add_parser(
+        'programs',
+        help='Find the programs of archetypes that genes move together',
+        description='Find programs, sets of archetypes that genes move '
+                    'together, by sparse PCA on effects/pooled.parquet; group '
+                    'the genes into modules by their scores on them; and '
+                    'score every cell on them.')
+
+    parser.add_argument('--config', required=True,
+                        help='Path to configuration file (YAML or JSON)')
+    parser.add_argument('--steps', nargs='+',
+                        choices=('all',) + PROGRAM_STEPS,
+                        default=['all'],
+                        help='Steps to run (default: all)')
+    parser.add_argument('--quiet', action='store_true',
+                        help='Log warnings and errors only')
+
+    parser.set_defaults(func=_programs_command)
+
+
+def _programs_command(args: argparse.Namespace) -> int:
+    """Hand over to the programs."""
+    logging.basicConfig(
+        level=logging.WARNING if args.quiet else logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s')
+
+    try:
+        run_programs(args.config, steps=args.steps)
+    except Exception as e:
+        logger.error(f"Programs failed: {e}", exc_info=True)
+        return 1
+
+    return 0
 
 
 def resolve_components(args: argparse.Namespace) -> List[str]:
