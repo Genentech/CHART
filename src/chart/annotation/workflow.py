@@ -58,17 +58,32 @@ def channel_grids(archetypes: ArchetypesConfig, channel: str) -> Dict[str, List[
     return grids
 
 
-def _normal_ids(annotation: AnnotationConfig, channel: str,
-                grids: Dict[str, List[Path]]) -> List[str]:
-    """The archetypes the baseline step compares every other with."""
-    numbers = annotation.normal_archetypes.get(channel) or []
+def _normal_ids(archetypes: ArchetypesConfig, annotation: AnnotationConfig,
+                channel: str, grids: Dict[str, List[Path]]) -> List[str]:
+    """The archetypes the baseline step compares every other with: those
+    ``normal_archetypes`` names, or else the most abundant one."""
+    numbers = annotation.normal_archetypes.get(channel)
+    if not numbers:
+        return [_most_abundant(archetypes, channel, grids)]
     normal = [str(n) for n in (numbers if isinstance(numbers, list) else [numbers])]
-    if not normal or any(number not in grids for number in normal):
+    if any(number not in grids for number in normal):
         raise ValueError(f"'{ANNOTATION_SECTION}.normal_archetypes' has to name "
                          f"archetypes of {channel} that the crops step drew and "
                          f"'{ARCHETYPES_SECTION}.archetypes_to_remove' keeps; "
-                         f"it names {', '.join(normal) or 'none'}")
+                         f"it names {', '.join(normal)}")
     return normal
+
+
+def _most_abundant(archetypes: ArchetypesConfig, channel: str,
+                   grids: Dict[str, List[Path]]) -> str:
+    """The archetype among *grids* with the largest total weight over all cells."""
+    columns = [f'Archetype{number}' for number in grids]
+    totals = pd.read_parquet(archetypes.weights_path(channel), columns=columns).sum()
+    number = totals.idxmax()[len('Archetype'):]
+    logger.info(f"{channel}: '{ANNOTATION_SECTION}.normal_archetypes' names none, "
+                f"so the baseline is archetype {number}, the one with the most "
+                f"weight over all cells")
+    return number
 
 
 def annotate_channel(archetypes: ArchetypesConfig, annotation: AnnotationConfig,
@@ -76,7 +91,8 @@ def annotate_channel(archetypes: ArchetypesConfig, annotation: AnnotationConfig,
                      resume: bool = False) -> str:
     """Run *steps* on one channel, returning the directory they wrote to."""
     grids = channel_grids(archetypes, channel)
-    normal = _normal_ids(annotation, channel, grids) if 'baseline' in steps else []
+    normal = (_normal_ids(archetypes, annotation, channel, grids)
+              if 'baseline' in steps else [])
     directory = Path(annotation.channel_path(channel))
 
     for step in steps:

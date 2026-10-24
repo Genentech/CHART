@@ -479,6 +479,12 @@ def test_the_grids_are_named_as_the_annotation_reads_them(tmp_path, monkeypatch)
         f'archetype{n}_{CHANNEL}_grid_{row}.png' for n in (1, 2) for row in (1, 2)]
 
 
+def test_the_total_weights_are_drawn_beside_the_crops(tmp_path, monkeypatch):
+    run_archetypes(crop_config(tmp_path, monkeypatch), channels=[CHANNEL],
+                   steps=['crops'])
+    assert (crops_dir(tmp_path).parent / crops.TOTAL_WEIGHTS_NAME).exists()
+
+
 def test_a_cell_at_the_edge_of_the_image_is_cropped_inside_it():
     assert crops.crop_bounds((0, 0, 10, 10), (100, 100)) == (0, 0, 18, 18)
     assert crops.crop_bounds((90, 95, 100, 100), (100, 100)) == (82, 87, 100, 100)

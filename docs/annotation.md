@@ -12,7 +12,7 @@ It reads the grids drawn by the `crops` step of `chart archetypes`, leaving out 
 
 ## Usage
 
-Each channel needs one or more normal archetypes, chosen from the crops, against which every archetype is compared:
+Every archetype is compared with its channel's normal archetypes. By default this is the most abundant archetype, the one with the largest total weight over all cells; to choose them instead, inspect the crops and list one or more by number:
 
 ```yaml
 annotation:
@@ -20,6 +20,8 @@ annotation:
     TOM20: [10]
     FAK: [5, 8, 11]
 ```
+
+The crops step of `chart archetypes` draws each archetype's total weight in `archetype_total_weights.png`, beside the crops. If a second archetype comes close to the most abundant one, or several have high weights and look alike in their crops, name them all; otherwise those left out are described as departures from a morphology they share with the baseline.
 
 ```
 chart annotation --config my_screen.yaml --all-channels
@@ -56,7 +58,7 @@ annotation:
   max_pairs_per_archetype: 0     # closest partners kept per archetype; 0 keeps all
 ```
 
-The values shown are the defaults. `normal_archetypes` has to be set for every channel before `baseline` runs. The stage also reads `archetypes.channels`, `archetypes.archetypes_to_remove`, and `archetypes.reports_dir`, under which the crops are.
+The values shown are the defaults. A channel missing from `normal_archetypes` is compared with its most abundant archetype, read from the weights `chart archetypes` wrote. The stage also reads `archetypes.channels`, `archetypes.archetypes_to_remove`, and `archetypes.reports_dir`, under which the crops are.
 
 ## Outputs
 
@@ -65,8 +67,7 @@ All files are written to `annotation/<channel>/` under `local_output_dir`. Arche
 | File | Contents |
 |---|---|
 | `archetype_annot/archetype<N>_grid_<g>_annotation.md` | Description of one grid |
-| `contrastive_baselines/contrastive_baseline_notes.json` | Each archetype against the normal archetypes; `contrastive_baseline_report.md` holds the same notes |
-| `archetype_reviews/archetype<N>_synthesis.md` | Summary, names and hypothesis |
+| `contrastive_baselines/contrastive_baseline_notes.json` | Each archetype against the normal archetypes; `contrastive_baseline_report.md` holds the same notes || `archetype_reviews/archetype<N>_synthesis.md` | Summary, names and hypothesis |
 | `archetype_reviews/archetype<N>_contrast_vs<M>.md` | Traits distinguishing archetype N from M |
 | `archetype_reviews/archetype<N>_final.md` | Final summary, names, hypothesis, and the archetypes it was contrasted with |
 | `archetype_reviews/combined_archetype_synthesis.md`, `combined_archetype_final.md` | Every archetype's report in one file |
@@ -90,7 +91,7 @@ All files are written to `annotation/<channel>/` under `local_output_dir`. Arche
 |---|---|
 | `No top_cells.parquet in ...; run the crops step of chart archetypes for ...` | The channel has no crops; run `chart archetypes --steps crops` for it |
 | `top_cells.parquet lists archetype ..., but ... is not in ...; rerun the crops step` | The grid images are incomplete; rerun the crops step |
-| `'annotation.normal_archetypes' has to name archetypes of ... that the crops step drew and 'archetypes.archetypes_to_remove' keeps` | No normal archetype is set for the channel, or one named was removed or not drawn |
+| `'annotation.normal_archetypes' has to name archetypes of ... that the crops step drew and 'archetypes.archetypes_to_remove' keeps` | An archetype named under `normal_archetypes` was removed or not drawn |
 | `Missing langchain_openai, sentence_transformers. ...` | The annotation extra is not installed |
 | `No LLM provider is configured ...` | No credentials in the environment; see [Installation](installation.md) |
 | `... model returned no text ...`, `... reply was cut off at the token ceiling ...` | The model spent its token budget; rerun the step, with `--resume` for `annotate` |

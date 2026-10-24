@@ -29,7 +29,7 @@ Only the two output directories are required. Tables are written under `data_out
 
 - `archetypes.k`, and `archetypes.npc`, after checking the recovery curve and the variance elbow ([Archetypes](archetypes.md))
 - `archetypes.archetypes_to_remove`, after inspecting the crops ([Archetypes](archetypes.md))
-- `annotation.normal_archetypes`, before annotating ([Annotation](annotation.md))
+- `annotation.normal_archetypes`, optionally, after inspecting the crops; otherwise the most abundant archetype is used ([Annotation](annotation.md))
 
 **Analysis parameters.** The defaults are those of the published analysis. Changing them changes the results, so they are best changed deliberately and recorded.
 

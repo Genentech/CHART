@@ -36,6 +36,9 @@ CROPS_DIR = 'crops'
 #: The table of the cells shown, written beside the grids.
 TOP_CELLS_NAME = 'top_cells'
 
+#: The bar chart of each archetype's total weight, in the reports directory.
+TOTAL_WEIGHTS_NAME = 'archetype_total_weights.png'
+
 #: Cells to a row, which is what the annotation reads.
 CELLS_PER_GRID = 5
 
@@ -112,6 +115,22 @@ def with_boxes(cells: pd.DataFrame, objects: pd.DataFrame,
                          f"cell {first['Label']} of well {first['Well']}; the "
                          f"table may come from another run than the weights")
     return cells
+
+
+def plot_total_weights(weights: pd.DataFrame, channel: str,
+                       output_dir: str) -> None:
+    """Bar chart of each archetype's total weight over all cells, largest first."""
+    totals = weights.drop(columns=list(INDEX_COLUMNS)).sum().sort_values(ascending=False)
+    fig, ax = plt.subplots(figsize=(max(4, 0.4 * len(totals)), 3))
+    ax.bar([f'A{name[len("Archetype"):]}' for name in totals.index],
+           totals.to_numpy())
+    ax.set_ylabel('Total weight')
+    ax.set_title(f'{channel}: total weight over all cells')
+    ax.tick_params(axis='x', rotation=45)
+    os.makedirs(output_dir, exist_ok=True)
+    fig.savefig(os.path.join(output_dir, TOTAL_WEIGHTS_NAME), dpi=300,
+                bbox_inches='tight')
+    plt.close(fig)
 
 
 def crop_bounds(box: Sequence[float],
@@ -278,8 +297,9 @@ def write_channel_crops(source: Any, archetypes: ArchetypesConfig,
     path = archetypes.weights_path(channel)
     logger.info(f"Reading {path}")
     bbox_columns = archetypes.schema.bbox_columns
-    cells = top_cells(pd.read_parquet(path), objects, archetypes.top_cells,
-                      bbox_columns)
+    weights = pd.read_parquet(path)
+    plot_total_weights(weights, channel, archetypes.report_path(channel))
+    cells = top_cells(weights, objects, archetypes.top_cells, bbox_columns)
 
     output_dir = join_path(archetypes.report_path(channel), CROPS_DIR)
     save_table(cells, output_dir, TOP_CELLS_NAME)

@@ -5,6 +5,7 @@ The fake answers each prompt in the format the prompt asks for, so the
 steps run end to end on a small crops folder without a key.
 """
 
+import json
 import os
 import re
 from pathlib import Path
@@ -53,9 +54,14 @@ class FakeEmbedder:
 
 
 def crops(root, archetypes=(1, 2, 3, 4), cells=15):
-    """What the crops step leaves: a listing, and grids of five cells."""
+    """What the archetypes stage leaves: the weights, a listing, and grids of
+    five cells."""
     directory = root / 'archetypes' / CHANNEL / 'crops'
     directory.mkdir(parents=True)
+    (directory.parent / 'npc.txt').write_text('8\n')
+    pd.DataFrame({'Archetype1': [0.1, 0.1], 'Archetype2': [0.5, 0.6],
+                  'Archetype3': [0.3, 0.2], 'Archetype4': [0.1, 0.1]}
+                 ).to_parquet(directory.parent / f'robust_archweights-{CHANNEL}_k4_gamma30_knn10_npc8.parquet')
     pd.DataFrame([{'Archetype': f'Archetype{n}', 'Rank': rank}
                   for n in archetypes for rank in range(1, cells + 1)]
                  ).to_parquet(directory / 'top_cells.parquet')
@@ -66,8 +72,8 @@ def crops(root, archetypes=(1, 2, 3, 4), cells=15):
 
 
 def config(root):
-    return {'local_output_dir': str(root),
-            'archetypes': {'channels': [CHANNEL],
+    return {'local_output_dir': str(root), 'data_output_dir': str(root),
+            'archetypes': {'channels': [CHANNEL], 'k': {CHANNEL: 4},
                            'archetypes_to_remove': {'debris': [f'{CHANNEL}_Archetype2', 'FAK_Archetype1']}},
             'annotation': {'normal_archetypes': {CHANNEL: [1]}}}
 
@@ -121,6 +127,16 @@ def test_the_dashboard_alone_needs_no_key(tmp_path, model, monkeypatch):
 
     run_annotation(config(tmp_path), steps=['dashboard'])
     assert model == []
+
+
+def test_without_normal_archetypes_the_most_abundant_kept_one_is_the_baseline(tmp_path, model):
+    crops(tmp_path)
+    settings = config(tmp_path)
+    del settings['annotation']['normal_archetypes']
+
+    notes = (Path(run_annotation(settings, steps=['baseline'])[CHANNEL])
+             / steps.BASELINE_DIR / steps.BASELINE_NOTES)
+    assert json.loads(notes.read_text())['normal_ids'] == ['3']
 
 
 def test_a_grid_the_crops_step_did_not_write_is_reported(tmp_path, model):

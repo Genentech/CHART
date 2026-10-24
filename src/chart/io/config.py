@@ -660,7 +660,8 @@ class AnnotationConfig:
     local_output_dir: str = ''
     reports_dir: str = 'annotation/'
 
-    #: Each channel's normal archetypes, by number.
+    #: Each channel's normal archetypes, by number; a channel left out gets
+    #: the archetype with the most weight over all cells.
     normal_archetypes: Dict[str, List[int]] = field(default_factory=dict)
     model: str = 'gpt-5.5'
     similarity_threshold: float = 0.08

@@ -80,6 +80,7 @@ Each channel's data are written to `archetypes/<channel>/` under `data_output_di
 | `space_evals.csv` | local | Size, dispersion and separation of each partition into metacells |
 | `evalK_recovery_curves.csv`, `evalK_recovery_plot.png` | local | Reconstruction error against K, and why any K was excluded |
 | `robust_archweights-….pdf` | local | The distribution of each archetype's weights over cells |
+| `archetype_total_weights.png` | local | Each archetype's total weight over all cells, written by `crops` |
 | `crops/archetype<N>_<channel>_grid_<row>.png` | local | Each archetype's top cells, five to an image |
 | `crops/top_cells.parquet` | local | The cells shown, with their weights and bounding boxes |
 
@@ -97,6 +98,8 @@ archetypes:
 ```
 
 `chart effects` does not test them, and since all tests are corrected together, removing one also changes the q-values of the rest; `chart annotation` does not describe them. The numbering belongs to one fit: changing K, `npc` or the selected parameter pair renumbers the archetypes, and the list has to be made again.
+
+The crops, with `archetype_total_weights.png`, are also where each channel's normal archetypes for `chart annotation` are chosen; see [Annotation](annotation.md).
 
 ## Method
 

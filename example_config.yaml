@@ -226,7 +226,8 @@ annotation:
   reports_dir: annotation/
 
   # Each channel's normal archetypes, by number; every archetype is
-  # compared with them.
+  # compared with them.  A channel left out is compared with the
+  # archetype with the most weight over all cells.
   # normal_archetypes:
   #   TOM20: [10]
   #   FAK: [5, 8, 11]
