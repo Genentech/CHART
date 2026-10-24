@@ -16,6 +16,22 @@ The stage reads `effects/pooled.parquet` from `chart effects`, the per-channel a
 chart programs --config my_screen.yaml
 ```
 
+**Required**
+
+| Argument | Value | Notes |
+|---|---|---|
+| `--config` | a path | The configuration file, in YAML or JSON |
+
+**Optional**
+
+| Argument | Value | Default | Notes |
+|---|---|---|---|
+| `--steps` | one or more steps from the table below, or `all` | `all` | The steps to run |
+| `--n-jobs` | `-1`, or a number of cores | the top-level `n_jobs`, else `-1` | The cores the sparse PCA in `fit` and `modules` uses; `-1` uses every core available to the run, which under SLURM is the job's allocation |
+| `--quiet` | | off | Log warnings and errors only |
+
+## Steps
+
 | Step | Output |
 |---|---|
 | `matrix` | Signed effects of the significant perturbations on the significant archetypes |
@@ -31,9 +47,6 @@ chart programs --config my_screen.yaml --steps fit modules cells
 
 > [!NOTE]
 > `modules` refits the decomposition 150 times; for 471 perturbations and 188 archetypes it takes about 20 minutes on 96 cores.
-
-The sparse PCA uses every core available to the run, which under SLURM is the job's allocation; the top-level `n_jobs`, or `--n-jobs`, sets a number instead.
-
 ## Configuration
 
 ```yaml

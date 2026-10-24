@@ -28,6 +28,24 @@ chart annotation --config my_screen.yaml --all-channels
 chart annotation --config my_screen.yaml --channel TOM20 --steps annotate baseline
 ```
 
+**Required**
+
+| Argument | Value | Notes |
+|---|---|---|
+| `--config` | a path | The configuration file, in YAML or JSON |
+| `--channel` or `--all-channels` | for `--channel`, one or more channels, separated by spaces | The channels to process; `--all-channels` processes every channel under `archetypes.channels` |
+
+**Optional**
+
+| Argument | Value | Default | Notes |
+|---|---|---|---|
+| `--steps` | one or more steps from the table below, or `all` | `all` | The steps to run |
+| `--resume` | | off | Keep the descriptions `annotate` has already written, so an interrupted run continues where it stopped |
+| `--continue-on-error` | | off | Log a failed channel and carry on with the rest |
+| `--quiet` | | off | Log warnings and errors only |
+
+## Steps
+
 | Step | Output |
 |---|---|
 | `annotate` | An observational description of each of the archetype's first two grids |
@@ -42,7 +60,7 @@ chart annotation --config my_screen.yaml --channel TOM20 --steps annotate baseli
 chart annotation --config my_screen.yaml --channel TOM20 --steps baseline synthesize refine dashboard
 ```
 
-`--resume` keeps the descriptions `annotate` has already written, so an interrupted run continues where it stopped. `--continue-on-error` carries on with the remaining channels after a failure. `dashboard` on its own needs no model or credentials.
+`dashboard` on its own needs no model or credentials.
 
 > [!NOTE]
 > Calls are made one at a time. For a channel with $K$ archetypes, `annotate` makes up to $2K$ image calls, `baseline` $K$, `synthesize` $2K$ text calls, and `refine` two image calls per similar pair and one rewrite per archetype in a pair. `refine` compares summaries with the sentence-transformers model `all-MiniLM-L6-v2`, downloaded from Hugging Face on first use; on a machine without internet access, download it beforehand.

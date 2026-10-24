@@ -9,6 +9,33 @@ chart preprocessing --config my_screen.yaml --all-wells
 chart preprocessing --config my_screen.yaml --well A1 --steps qc filter
 ```
 
+**Required**
+
+| Argument | Value | Notes |
+|---|---|---|
+| `--config` | a path | The configuration file, in YAML or JSON |
+| `--well` or `--all-wells` | for `--well`, one or more wells, separated by spaces | The wells to process, named as described under [Your data](data.md); `--all-wells` processes every well of the screen |
+
+**Optional**
+
+| Argument | Value | Default | Notes |
+|---|---|---|---|
+| `--steps` | one or more steps from the table below, or `all` | `all` | The steps to run |
+| `--save-plots` | | off | Write the diagnostic plots; without it, none are written |
+| `--plots-dir` | a path | each step's own, under `local_output_dir` | Write every plot to this directory instead |
+| `--continue-on-error` | | off | Log a failed well or step and carry on with the rest |
+| `--n-jobs` | `-1`, or a number of cores | the top-level `n_jobs`, else `-1` | The cores `normalize` and `guides` use; `-1` uses every core available to the run |
+| `--quiet` | | off | Log warnings and errors only; this also hides the note that `--well` held back the across-wells steps |
+| `--components` | one or more of `plots`, `segmentation`, `pheno`, `pheno_sbs`, `filters`, or `all` | `all` | The quality-control components `qc` runs; `filters` writes the lists. A component whose prerequisites, such as image directories or SCALLOPS, are missing is skipped with a warning, or stops the run when named |
+| `--targets` | one or more of `objects`, `features`, or `all` | `all` | The tables `filter` applies the filter lists to |
+| `--level` | one of `cell`, `guide`, `gene` | `cell` | The identifiers kept in the index of the tables `combine` writes; the rows stay one per cell. Only `cell` keeps each cell's label, which `chart archetypes` needs |
+| `--validate` | | off | Plot five features chosen at random in each well, before and after `normalize`; written only with `--save-plots` |
+| `--aggregate` | one or more of `guide`, `gene` | none for `normalize`, `guide` for `outliers` | Tables summarised per guide or per perturbation that `normalize` and `outliers` also write. This replaces both steps' defaults; `guides` reads the per-guide table `outliers` writes, so include `guide` |
+| `--skip-prefilters` | one or more of `missing`, `variation`, `incomplete` | none | Prefilters `outliers` does not run (see Method), when they leave no cells or no features |
+| `--aggregation-method` | one of `median`, `mean`, `std` | `median` | The statistic the per-guide and per-perturbation tables are summarised with. `guides` scores guides on their summaries, so this also changes which guides are removed |
+
+## Steps
+
 | Step | Runs | Output |
 |---|---|---|
 | `qc` | per well | Lists of cells failing quality control |
@@ -24,11 +51,16 @@ chart preprocessing --config my_screen.yaml --well A1 --steps qc filter
 chart preprocessing --config my_screen.yaml --all-wells --steps guides
 ```
 
-With `--well`, only the per-well steps run unless the across-wells steps are named in `--steps`, since those write one table for the whole screen. The per-well steps can therefore run as separate jobs, one per well, followed by a single `--all-wells --steps combine normalize outliers guides`. If the step before it runs in the same command but fails or writes nothing, a step does not run rather than read an older table.
+`--all-wells` without `--steps` runs every step in one command. With `--well`, only the per-well steps run unless the across-wells steps are named in `--steps`, since those write one table for the whole screen. The per-well steps can therefore run as separate jobs, one per well, followed by a single run across wells:
 
-`--components` selects the quality-control components: `plots`, `segmentation`, `pheno`, `pheno_sbs`, and `filters`, which writes the lists. A component whose prerequisites are missing, such as image directories or SCALLOPS, is skipped with a warning, or stops the run when named in `--components`.
+```
+chart preprocessing --config my_screen.yaml --well A1 --steps qc filter --save-plots
+chart preprocessing --config my_screen.yaml --all-wells --steps combine normalize outliers guides --save-plots
+```
 
-Plots are written only with `--save-plots`; `--validate` adds before-and-after distributions of the normalisation. `--continue-on-error` carries on with the remaining wells after a failure. `normalize` and `guides` use every core available to the run; the top-level `n_jobs`, or `--n-jobs`, sets a number instead. The log is written to `preprocessing/bywell/qc_reports/` under `local_output_dir`.
+If the step before it runs in the same command but fails or writes nothing, a step does not run rather than read an older table.
+
+The log is written to `preprocessing/bywell/qc_reports/` under `local_output_dir`.
 
 ## Configuration
 

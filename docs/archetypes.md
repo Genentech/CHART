@@ -15,6 +15,28 @@ chart archetypes --config my_screen.yaml --all-channels
 chart archetypes --config my_screen.yaml --channel TOM20 --steps selectk weights crops
 ```
 
+**Required**
+
+| Argument | Value | Notes |
+|---|---|---|
+| `--config` | a path | The configuration file, in YAML or JSON |
+| `--channel` or `--all-channels` | for `--channel`, one or more channels, separated by spaces | The channels to process; `--all-channels` processes every channel under `archetypes.channels` |
+
+**Optional**
+
+| Argument | Value | Default | Notes |
+|---|---|---|---|
+| `--steps` | one or more steps from the table below, or `all` | `all` | The steps to run |
+| `--dry-run` | | off | Print every command the stage would run, without running it; needs no R |
+| `--continue-on-error` | | off | Log a failed step or channel and carry on with the rest |
+| `--parallel-channels` | a number of channels | `archetypes.parallel_channels`, else 1 | The channels to run at once, each in its own process |
+| `--quiet` | | off | Log warnings and errors only |
+| `--scripts-dir` | a path | the scripts that ship with CHART | The directory holding the R scripts |
+
+Channels run one at a time unless `archetypes.parallel_channels` or `--parallel-channels` says otherwise; each then logs to `archetypes/<channel>/` under `local_output_dir`. Memory, not cores, limits how many fit: the `metacells` step needed about 62 GB for one channel of 875,000 cells. Channels can also run as separate jobs with `--channel`.
+
+## Steps
+
 | Step | Runs | Output |
 |---|---|---|
 | `pca` | Python | The channel's PCA space, centred on the controls |
@@ -32,9 +54,7 @@ chart archetypes --config my_screen.yaml --channel TOM20 --steps selectk weights
 chart archetypes --config my_screen.yaml --channel TOM20 --steps selectk weights crops
 ```
 
-The R steps need the environment described under [Installation](installation.md); the stage checks that R can load every package before the first step. `--dry-run` prints every command the stage would run, and needs no R. `--continue-on-error` carries on with the remaining steps and channels after a failure.
-
-Channels run one at a time. `archetypes.parallel_channels`, or `--parallel-channels`, runs several at once, each in its own process and logging to `archetypes/<channel>/` under `local_output_dir`. Memory, not cores, limits how many fit: the `metacells` step needed about 62 GB for one channel of 875,000 cells. Channels can also run as separate jobs with `--channel`.
+The R steps need the environment described under [Installation](installation.md); the stage checks that R can load every package before the first step.
 
 > [!IMPORTANT]
 > `selectk` chooses K automatically and says so in the log. Check its choice against `evalK_recovery_plot.png` before going further; to overrule it, set `archetypes.k` for the channel and rerun `--steps selectk weights crops`.

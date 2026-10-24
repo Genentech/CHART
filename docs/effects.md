@@ -27,9 +27,22 @@ chart effects --config my_screen.yaml --all-channels
 chart effects --config my_screen.yaml --channel TOM20 CALR
 ```
 
-Channels can be tested in separate runs, for instance as separate cluster jobs. Each run ends by pooling, which happens only once every channel in `archetypes.channels` has a table, from that run or an earlier one; until then it is skipped with a warning. A channel that fails in a run blocks pooling in that run, since any table of its on disk is from an earlier one. `--continue-on-error` carries on with the remaining channels after a failure.
+**Required**
 
-Perturbations are distributed over worker processes, by default one per core available to the run, which under SLURM is the job's allocation. `effects.n_jobs` sets their number for this stage, the top-level `n_jobs` for every stage, and `--n-jobs` overrides both.
+| Argument | Value | Notes |
+|---|---|---|
+| `--config` | a path | The configuration file, in YAML or JSON |
+| `--channel` or `--all-channels` | for `--channel`, one or more channels, separated by spaces | The channels to test; `--all-channels` tests every channel under `archetypes.channels` |
+
+**Optional**
+
+| Argument | Value | Default | Notes |
+|---|---|---|---|
+| `--continue-on-error` | | off | Log a failed channel and carry on with the rest |
+| `--n-jobs` | `-1`, or a number of worker processes | `effects.n_jobs`, else the top-level `n_jobs`, else `-1` | The worker processes the perturbations are distributed over; `-1` starts one per core available to the run, which under SLURM is the job's allocation |
+| `--quiet` | | off | Log warnings and errors only |
+
+Channels can be tested in separate runs, for instance as separate cluster jobs. Each run ends by pooling, which happens only once every channel in `archetypes.channels` has a table, from that run or an earlier one; until then it is skipped with a warning. A channel that fails in a run blocks pooling in that run, since any table of its on disk is from an earlier one.
 
 ## Configuration
 
