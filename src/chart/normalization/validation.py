@@ -67,7 +67,7 @@ def plot_normalization(original: pd.DataFrame,
                                                  (normalized, 'Normalized'))):
             sns.kdeplot(data=frame, x=feature, hue=well_column, ax=axes[i, column])
             axes[i, column].set_title(f'{label}: {feature}')
-            axes[i, column].legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+            sns.move_legend(axes[i, column], 'upper left', bbox_to_anchor=(1.05, 1))
 
     plt.tight_layout()
 
