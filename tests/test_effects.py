@@ -14,6 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from scipy.stats import wasserstein_distance
+from threadpoolctl import threadpool_info, threadpool_limits
 
 from chart.effects import COLUMNS, run_effects, workflow
 from chart.io.config import (EffectsConfig, load_allwells_config,
@@ -161,6 +162,14 @@ def test_n_jobs_given_to_the_run_wins_over_the_config(tmp_path, caplog):
     caplog.set_level('INFO')
     run_effects(with_weights(tmp_path), channels=[CHANNEL], n_jobs=2)
     assert '2 workers' in caplog.text
+
+
+def test_each_worker_keeps_the_maths_library_to_one_thread():
+    # A worker per core, each starting a thread per core besides, took
+    # hours over what one thread each did in minutes.
+    with threadpool_limits(limits=2), mock.patch.dict(workflow._shared):
+        workflow._share(*[np.zeros(1)] * 4)
+        assert {info['num_threads'] for info in threadpool_info()} == {1}
 
 
 def test_a_channel_without_weights_stops_the_run(tmp_path):

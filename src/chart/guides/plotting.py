@@ -92,7 +92,7 @@ def plot_control_outliers(controls_pca: pd.DataFrame,
 
 def plot_similarity_comparison(scores: pd.DataFrame, threshold: float,
                                output_dir: str) -> None:
-    """Scatter each guide's agreement with its gene against the controls.
+    """Overlay the guides' similarity to their gene and to the controls.
 
     Args:
         scores: The ``scores`` of a
@@ -106,31 +106,20 @@ def plot_similarity_comparison(scores: pd.DataFrame, threshold: float,
         logger.info("No guide was scored, so there is no similarity plot")
         return
 
-    same_gene = scores[SIMILARITY_COLUMN]
-    to_controls = scores[NTC_SIMILARITY_COLUMN]
+    finite = pd.concat([scores[SIMILARITY_COLUMN],
+                        scores[NTC_SIMILARITY_COLUMN]]).dropna()
+    fig, ax = plt.subplots(figsize=(6, 4))
+    for column, label, colour in (
+            (SIMILARITY_COLUMN, 'Same gene', '#1F77B4'),
+            (NTC_SIMILARITY_COLUMN, 'Non-targeting controls', '#9F8170')):
+        values = scores[column].dropna()
+        if len(values):
+            ax.hist(values, bins=30, range=(finite.min(), finite.max()),
+                    color=colour, alpha=0.6, label=label)
 
-    fig, ax = plt.subplots(figsize=(10, 8))
-    points = ax.scatter(same_gene, to_controls, alpha=0.6, s=50, c=same_gene,
-                        cmap='viridis', edgecolors='black', linewidth=0.5)
-
-    finite = pd.concat([same_gene, to_controls]).dropna()
-    if len(finite):
-        limits = [finite.min(), finite.max()]
-        ax.plot(limits, limits, 'r--', alpha=0.7, label='Equal similarity')
-
-    ax.axvline(threshold, color='k', linestyle=':', alpha=0.7,
+    ax.axvline(threshold, color='k', linestyle='--',
                label=f'Threshold {threshold}')
-    ax.set_xlabel('Cosine similarity to the same gene')
-    ax.set_ylabel('Cosine similarity to the controls')
-    ax.set_title('Guide agreement: same gene against controls')
-    fig.colorbar(points, ax=ax, label='Similarity to the same gene')
-    ax.legend()
-    ax.grid(alpha=0.3)
-
-    correlation = same_gene.corr(to_controls)
-    if pd.notna(correlation):
-        ax.text(0.05, 0.95, f'Correlation: {correlation:.3f}',
-                transform=ax.transAxes, fontsize=12,
-                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-
+    ax.set_xlabel('Cosine similarity')
+    ax.set_ylabel('Guides')
+    ax.legend(frameon=False)
     _save(fig, output_dir, 'guide_similarity_comparison.png')

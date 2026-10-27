@@ -15,6 +15,7 @@ Start with [Installation](installation.md) and [Your data](data.md); a quickstar
 :hidden:
 
 installation
+tutorial
 data
 configuration
 preprocessing

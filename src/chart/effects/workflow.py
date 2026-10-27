@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import numpy as np
 import pandas as pd
+from threadpoolctl import threadpool_limits
 
 from .. import __version__
 from ..dimred.channels import INDEX_COLUMNS
@@ -159,6 +160,9 @@ _shared: Dict[str, np.ndarray] = {}
 
 def _share(genes: np.ndarray, wells: np.ndarray, controls: np.ndarray,
            Z: np.ndarray) -> None:
+    # The workers already take a core each; left alone, every one's maths
+    # library would start a thread per core as well.
+    threadpool_limits(limits=1)
     _shared.update(genes=genes, wells=wells, controls=controls, Z=Z)
 
 
